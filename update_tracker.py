@@ -9,7 +9,7 @@ from dateutil import parser as dateparser
 
 from linkedin_tracker.gmail_client import get_gmail_service
 from linkedin_tracker.parser import get_html_body, parse_application_email
-from linkedin_tracker.sent_matcher import fetch_sent_index, find_hiring_manager
+from linkedin_tracker.sent_matcher import fetch_sent_index, find_hiring_managers
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROCESSED_FILE = os.path.join(BASE_DIR, 'processed_ids.json')
@@ -155,12 +155,15 @@ def main():
             processed.add(msg_id)
             continue
 
-        hiring_manager = None
+        hiring_managers = []
         if not args.no_hiring_manager:
-            hiring_manager = find_hiring_manager(data['company'], applied_dt.date(), sent_index)
+            hiring_managers = find_hiring_managers(data['company'], applied_dt.date(), sent_index)
+
+        hm_names = '; '.join(hm['name'] for hm in hiring_managers)
+        hm_emails = '; '.join(hm['email'] for hm in hiring_managers)
 
         if args.dry_run:
-            hm = f" | HM: {hiring_manager['name']} <{hiring_manager['email']}>" if hiring_manager else ''
+            hm = f" | HM: {hm_names} <{hm_emails}>" if hiring_managers else ''
             print(applied_dt.strftime('%m/%d/%Y'), '|', data['company'], '|', data['title'], '|', data['job_link'], hm)
         else:
             values = [
@@ -169,8 +172,8 @@ def main():
                 data['company'] or '',
                 'Yes',
                 data['job_link'] or '',
-                hiring_manager['name'] if hiring_manager else '',
-                hiring_manager['email'] if hiring_manager else '',
+                hm_names,
+                hm_emails,
                 None,
                 None,
             ]

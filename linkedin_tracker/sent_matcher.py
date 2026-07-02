@@ -34,69 +34,78 @@ def name_from_email_local(local_part):
 
 
 def fetch_sent_index(service, fetch_all_messages_fn, since_query_date, max_results=2000):
-    """Build an index of {date, name, email, domain} for every message sent
-    since since_query_date (a date object). 'name' prefers the display name
-    on the To header, falling back to a name guessed from the email address
-    itself (e.g. dipankar.k@x.com -> 'Dipankar K')."""
+    """Build an index of {date, name, email, domain} for every To/Cc
+    recipient of every message sent since since_query_date (a date object).
+    'name' prefers the display name on the header, falling back to a name
+    guessed from the email address itself (e.g. dipankar.k@x.com ->
+    'Dipankar K')."""
     query = f'in:sent after:{since_query_date.strftime("%Y/%m/%d")}'
     messages = fetch_all_messages_fn(service, query, max_results)
 
     index = []
     for m in messages:
         msg = service.users().messages().get(
-            userId='me', id=m['id'], format='metadata', metadataHeaders=['To', 'Date']
+            userId='me', id=m['id'], format='metadata', metadataHeaders=['To', 'Cc', 'Date']
         ).execute()
         headers = {h['name']: h['value'] for h in msg['payload'].get('headers', [])}
-        to_header = headers.get('To', '')
-        if not to_header:
+        recipients_header = ', '.join(filter(None, [headers.get('To', ''), headers.get('Cc', '')]))
+        if not recipients_header:
             continue
 
-        for recipient in to_header.split(','):
+        seen_addrs = set()
+        for recipient in recipients_header.split(','):
             disp_name, addr = parseaddr(recipient.strip())
             if not addr or '@' not in addr:
                 continue
+            addr = addr.lower().strip()
+            if addr in seen_addrs:
+                continue
+            seen_addrs.add(addr)
 
             disp_name = disp_name.strip()
-            if disp_name.lower() == addr.lower():
+            if disp_name.lower() == addr:
                 disp_name = ''
 
             name = disp_name or name_from_email_local(addr.split('@')[0]) or ''
 
-            domain = addr.split('@')[-1].lower().strip()
+            domain = addr.split('@')[-1]
             sent_dt = datetime.fromtimestamp(int(msg['internalDate']) / 1000)
             index.append({
                 'date': sent_dt.date(),
                 'name': name.strip(),
-                'email': addr.lower().strip(),
+                'email': addr,
                 'domain': domain,
             })
 
     return index
 
 
-def find_hiring_manager(company, applied_date, sent_index, min_score=0.3):
-    """Match a company name against sent emails on the same calendar date by
-    comparing significant company-name words against the recipient's email
-    domain. Returns {'name': ..., 'email': ...} or None."""
+def find_hiring_managers(company, applied_date, sent_index, min_score=0.3):
+    """Match a company name against sent emails (To/Cc) on the same calendar
+    date by comparing significant company-name words against each
+    recipient's email domain. Returns a list of {'name': ..., 'email': ...}
+    for every distinct matching address, best score first (empty list if
+    none match)."""
     company_words = normalize_words(company)
     if not company_words:
-        return None
+        return []
 
     candidates = [s for s in sent_index if s['date'] == applied_date]
-    best, best_score = None, 0.0
+    scored = []
+    seen_emails = set()
 
     for c in candidates:
-        if c['domain'] in GENERIC_DOMAINS:
+        if c['domain'] in GENERIC_DOMAINS or c['email'] in seen_emails:
             continue
         domain_base = c['domain'].split('.')[0]
         matches = sum(1 for w in company_words if len(w) >= 4 and w in domain_base)
         if matches == 0:
             continue
         score = matches / len(company_words)
-        if score > best_score:
-            best_score = score
-            best = c
+        if score < min_score:
+            continue
+        seen_emails.add(c['email'])
+        scored.append((score, c))
 
-    if best and best_score >= min_score:
-        return {'name': best['name'], 'email': best['email']}
-    return None
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [{'name': c['name'], 'email': c['email']} for _, c in scored]

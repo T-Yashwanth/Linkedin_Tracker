@@ -249,8 +249,8 @@ tracker_venv/Scripts/python update_tracker.py --no-hiring-manager
 | Company Full Name | Yes | Company name |
 | Applied In Linkedin | Yes | Always "Yes" for emails found this way |
 | Website Applied | Yes | Shortened link straight to the job posting |
-| Hiring Manager In Linkedin | Sometimes | Only if a matching Sent email was found on the same date |
-| Company Email | Sometimes | Same as above |
+| Hiring Manager In Linkedin | Sometimes | Only if a matching Sent email was found on the same date. If you emailed multiple people at that company that day (To **or** Cc), all of them are listed here, separated by `; ` |
+| Company Email | Sometimes | Same matches as above, in the same order, also `; `-separated |
 | Contact Number For Job Post | No | Left blank for you to fill in |
 | Comment Section | No | Left blank for you to fill in |
 
