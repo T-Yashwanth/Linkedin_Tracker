@@ -153,7 +153,21 @@ changes to it and will show a permission error.
 ## Understanding the flags
 
 A "flag" is an extra option you type after `update_tracker.py` to change
-how it behaves. You can combine several at once.
+how it behaves. You can combine several at once — order doesn't matter.
+
+Quick reference:
+
+| Flag | Takes a value? | Default | What it does |
+|---|---|---|---|
+| `--dry-run` | no | off | Preview only, writes nothing |
+| `--since` | yes, `YYYY-MM-DD` | none (all history) | Only include applications on/after this date |
+| `--rebuild` | no | off | Start the spreadsheet fresh, ignore `processed_ids.json` for this run |
+| `--no-hiring-manager` | no | off | Skip the Sent-mail lookup (faster, leaves those columns blank) |
+| `--tracker` | yes, a file path | `data/LinkedIn_Job_Tracker.xlsx` | Which spreadsheet file to read/write |
+| `--max-results` | yes, a number | `2000` | Cap on how many Gmail messages to scan |
+| `--source` | yes, `all`/`linkedin`/`dice` | `all` | Only fetch from one platform |
+
+Full explanation of each, with examples, below.
 
 ### `--dry-run`
 Preview only — prints what it *would* add to the spreadsheet, without
@@ -232,21 +246,71 @@ tracker_venv/Scripts/python update_tracker.py --source linkedin
 
 ### Common combinations
 
+**Day-to-day use — no flags needed:**
 ```bash
-# Safe test: see what a full rebuild would produce, without saving anything
-tracker_venv/Scripts/python update_tracker.py --since 2026-06-24 --rebuild --dry-run
+# Pulls in whatever's new from both LinkedIn and Dice since last time,
+# merges with existing rows, re-sorts by date. This is what you'll run most often.
+tracker_venv/Scripts/python update_tracker.py
+```
 
-# Actually do that rebuild for real
+**Previewing before you trust a run:**
+```bash
+# See exactly what a normal run would add, without touching the spreadsheet
+tracker_venv/Scripts/python update_tracker.py --dry-run
+
+# Preview just the Dice side of things
+tracker_venv/Scripts/python update_tracker.py --source dice --dry-run
+
+# Preview a full rebuild before committing to it
+tracker_venv/Scripts/python update_tracker.py --since 2026-06-24 --rebuild --dry-run
+```
+
+**Rebuilding from scratch:**
+```bash
+# Full rebuild, entire Gmail history, both platforms
+tracker_venv/Scripts/python update_tracker.py --rebuild
+
+# Rebuild, but only recent applications (faster, smaller sheet)
 tracker_venv/Scripts/python update_tracker.py --since 2026-06-24 --rebuild
 
-# Normal day-to-day use — pulls in whatever's new from both LinkedIn and Dice
-tracker_venv/Scripts/python update_tracker.py
+# Rebuild only the Dice rows' worth of data — e.g. after fixing a Dice
+# parsing bug, without forcing LinkedIn to be re-scanned too
+tracker_venv/Scripts/python update_tracker.py --source dice --since 2026-06-24 --rebuild
+```
+Note: `--rebuild` always deletes/recreates the *entire* spreadsheet file
+first (see the `--rebuild` section above), so combining it with `--source
+dice` still wipes LinkedIn rows too — they just won't get re-added in that
+run. Use this combo only if you plan to run `--source linkedin --rebuild`
+right after, or don't mind re-running the other source separately.
 
-# Only sync new Dice applications
+**Working with just one platform:**
+```bash
+# Only sync new Dice applications, leave LinkedIn alone
 tracker_venv/Scripts/python update_tracker.py --source dice
 
-# Quick sync, skip the slower hiring-manager lookup
+# Only sync new LinkedIn applications, leave Dice alone
+tracker_venv/Scripts/python update_tracker.py --source linkedin
+
+# Preview only recent Dice applications, skip hiring-manager lookup for speed
+tracker_venv/Scripts/python update_tracker.py --source dice --since 2026-06-29 --no-hiring-manager --dry-run
+```
+
+**Faster, lighter runs:**
+```bash
+# Skip the Sent-mail hiring-manager lookup entirely (much faster)
 tracker_venv/Scripts/python update_tracker.py --no-hiring-manager
+
+# Combine with --source and --since for the fastest possible sync
+tracker_venv/Scripts/python update_tracker.py --source dice --since 2026-07-01 --no-hiring-manager
+```
+
+**Testing safely on a throwaway file:**
+```bash
+# Try a full rebuild against a test copy instead of your real tracker
+tracker_venv/Scripts/python update_tracker.py --tracker data/test_copy.xlsx --rebuild
+
+# Test only the Dice source against that same throwaway file
+tracker_venv/Scripts/python update_tracker.py --tracker data/test_copy.xlsx --source dice
 ```
 
 ---
