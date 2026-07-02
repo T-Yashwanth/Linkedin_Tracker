@@ -33,6 +33,14 @@ def name_from_email_local(local_part):
     return None
 
 
+def guess_company_from_domain(domain):
+    """Best-effort, imperfect guess at a company name from a domain, e.g.
+    'gravityitresources.com' -> 'Gravityitresources'. Meant as a manual-edit
+    starting point, not an authoritative company name."""
+    base = domain.split('.')[0]
+    return base.capitalize() if base else ''
+
+
 def fetch_sent_index(service, fetch_all_messages_fn, since_query_date, max_results=2000):
     """Build an index of {date, name, email, domain} for every To/Cc
     recipient of every message sent since since_query_date (a date object).
@@ -109,3 +117,31 @@ def find_hiring_managers(company, applied_date, sent_index, min_score=0.3):
 
     scored.sort(key=lambda x: x[0], reverse=True)
     return [{'name': c['name'], 'email': c['email']} for _, c in scored]
+
+
+def find_reachout_contacts(sent_index, known_emails):
+    """Every distinct company-domain recipient in sent_index that isn't
+    already in known_emails (case-insensitive) and isn't on a generic/free
+    mail provider. One entry per unique email address, using the earliest
+    date it appears. Returns a list of {'date', 'name', 'email',
+    'company_guess'}."""
+    known = {e.lower().strip() for e in known_emails if e}
+    earliest = {}
+
+    for c in sent_index:
+        if c['domain'] in GENERIC_DOMAINS or c['email'] in known:
+            continue
+        existing = earliest.get(c['email'])
+        if existing is None or c['date'] < existing['date']:
+            earliest[c['email']] = c
+
+    contacts = []
+    for c in earliest.values():
+        contacts.append({
+            'date': c['date'],
+            'name': c['name'],
+            'email': c['email'],
+            'company_guess': guess_company_from_domain(c['domain']),
+        })
+    contacts.sort(key=lambda c: c['date'])
+    return contacts

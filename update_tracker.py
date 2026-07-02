@@ -10,7 +10,7 @@ from dateutil import parser as dateparser
 from linkedin_tracker.gmail_client import get_gmail_service
 from linkedin_tracker.parser import get_html_body, parse_application_email
 from linkedin_tracker.dice_parser import parse_dice_subject
-from linkedin_tracker.sent_matcher import fetch_sent_index, find_hiring_managers
+from linkedin_tracker.sent_matcher import fetch_sent_index, find_hiring_managers, find_reachout_contacts
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROCESSED_FILE = os.path.join(BASE_DIR, 'processed_ids.json')
@@ -55,6 +55,7 @@ SOURCES = [
     },
 ]
 SOURCES_BY_LABEL = {s['label'].lower(): s for s in SOURCES}
+REACHOUT_PLATFORM_VALUE = 'Email Reach Out'
 
 HEADERS = [
     'S.no', 'Date', 'Title', 'Company Full Name', 'Platform',
@@ -132,12 +133,19 @@ def main():
     ap.add_argument('--rebuild', action='store_true', help='Start the tracker fresh instead of appending')
     ap.add_argument('--no-hiring-manager', action='store_true', help='Skip matching hiring manager name/email from Sent mail')
     ap.add_argument('--dry-run', action='store_true', help='Parse and print results without writing to xlsx')
-    ap.add_argument('--source', choices=['all'] + list(SOURCES_BY_LABEL), default='all',
+    ap.add_argument('--source', choices=['all', 'reachout'] + list(SOURCES_BY_LABEL), default='all',
                      help='Only fetch new applications from this source (default: all)')
+    ap.add_argument('--include-reachout', action='store_true',
+                     help='Also log recruiters/contacts you emailed on a company domain that are not tied to an existing application')
     args = ap.parse_args()
 
     since_date = dateparser.parse(args.since).date() if args.since else None
-    active_sources = SOURCES if args.source == 'all' else [SOURCES_BY_LABEL[args.source]]
+    if args.source == 'reachout':
+        active_sources = []
+        include_reachout = True
+    else:
+        active_sources = SOURCES if args.source == 'all' else [SOURCES_BY_LABEL[args.source]]
+        include_reachout = args.include_reachout
 
     service = get_gmail_service()
     processed = set() if args.rebuild else load_processed()
@@ -163,11 +171,18 @@ def main():
             ws.delete_rows(2, last_row - 1)
 
     sent_index = []
-    if not args.no_hiring_manager:
+    need_sent_index = (not args.no_hiring_manager) or include_reachout
+    if need_sent_index:
         idx_since = since_date or datetime(2020, 1, 1).date()
-        print('Indexing your Sent mail for hiring manager matching...')
+        print('Indexing your Sent mail...')
         sent_index = fetch_sent_index(service, fetch_all_messages, idx_since)
         print(f'Indexed {len(sent_index)} sent message(s).')
+
+    known_emails = set()
+    for r in existing_rows:
+        emails_cell = r['values'][6]
+        if emails_cell:
+            known_emails.update(e.strip() for e in str(emails_cell).split(';') if e.strip())
 
     new_rows = []
     new_count = 0
@@ -210,6 +225,7 @@ def main():
             hiring_managers = []
             if not args.no_hiring_manager:
                 hiring_managers = find_hiring_managers(data['company'], applied_dt.date(), sent_index)
+                known_emails.update(hm['email'] for hm in hiring_managers)
 
             hm_names = '; '.join(hm['name'] for hm in hiring_managers)
             hm_emails = '; '.join(hm['email'] for hm in hiring_managers)
@@ -234,6 +250,30 @@ def main():
             new_count += 1
             processed.add(msg_id)
 
+    reachout_count = 0
+    if include_reachout:
+        contacts = find_reachout_contacts(sent_index, known_emails)
+        if since_date:
+            contacts = [c for c in contacts if c['date'] >= since_date]
+        for contact in contacts:
+            if args.dry_run:
+                print('Email Reach Out', '|', contact['date'].strftime('%m/%d/%Y'), '|', contact['company_guess'], '|', contact['name'], '|', contact['email'])
+            else:
+                values = [
+                    contact['date'].strftime('%m/%d/%Y'),
+                    '',
+                    contact['company_guess'],
+                    REACHOUT_PLATFORM_VALUE,
+                    '',
+                    contact['name'],
+                    contact['email'],
+                    None,
+                    None,
+                ]
+                new_rows.append({'date': contact['date'], 'values': values})
+            reachout_count += 1
+        print(f'Found {reachout_count} reach-out contact(s) not already tied to an existing application.')
+
     if not args.dry_run:
         all_rows = existing_rows + new_rows
         all_rows.sort(key=lambda r: r['date'])
@@ -244,9 +284,9 @@ def main():
 
         wb.save(args.tracker)
         save_processed(processed)
-        print(f'Added {new_count} new application(s); tracker now has {len(all_rows)} row(s), sorted by date, saved to {args.tracker}')
+        print(f'Added {new_count} new application(s) + {reachout_count} reach-out contact(s); tracker now has {len(all_rows)} row(s), sorted by date, saved to {args.tracker}')
     else:
-        print(f'{new_count} new application(s) would be added (dry run, nothing saved).')
+        print(f'{new_count} new application(s) + {reachout_count} reach-out contact(s) would be added (dry run, nothing saved).')
 
     if skipped_unparsed:
         print(f'Skipped {skipped_unparsed} email(s) that could not be parsed (marked as processed).')
