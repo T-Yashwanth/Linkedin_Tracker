@@ -1,0 +1,8 @@
+tracker_venv/
+__pycache__/
+*.pyc
+secrets/
+processed_ids.json
+data/*.xlsx
+~$*.xlsx
+.claude
