@@ -1,11 +1,11 @@
-# LinkedIn Application Tracker
+# Job Application Tracker
 
-This tool reads your Gmail inbox, finds the "Your application was sent to
-[Company]" emails LinkedIn sends every time you apply to a job, and
+This tool reads your Gmail inbox, finds the application-confirmation emails
+sent by **LinkedIn** and **Dice** every time you apply to a job, and
 automatically fills an Excel spreadsheet with the company name, job title,
-date, and a link back to the job posting. If it can also find an email you
-personally sent to someone at that company on the same day, it fills in
-that person's name and email address too.
+date, platform, and (for LinkedIn) a link back to the job posting. If it can
+also find an email you personally sent to someone at that company on the
+same day, it fills in that person's name and email address too.
 
 You run it from a terminal (a command-line window) on your own computer.
 It never sends or deletes anything in your Gmail — it only reads.
@@ -153,7 +153,21 @@ changes to it and will show a permission error.
 ## Understanding the flags
 
 A "flag" is an extra option you type after `update_tracker.py` to change
-how it behaves. You can combine several at once.
+how it behaves. You can combine several at once — order doesn't matter.
+
+Quick reference:
+
+| Flag | Takes a value? | Default | What it does |
+|---|---|---|---|
+| `--dry-run` | no | off | Preview only, writes nothing |
+| `--since` | yes, `YYYY-MM-DD` | none (all history) | Only include applications on/after this date |
+| `--rebuild` | no | off | Start the spreadsheet fresh, ignore `processed_ids.json` for this run |
+| `--no-hiring-manager` | no | off | Skip the Sent-mail lookup (faster, leaves those columns blank) |
+| `--tracker` | yes, a file path | `data/LinkedIn_Job_Tracker.xlsx` | Which spreadsheet file to read/write |
+| `--max-results` | yes, a number | `2000` | Cap on how many Gmail messages to scan |
+| `--source` | yes, `all`/`linkedin`/`dice` | `all` | Only fetch from one platform |
+
+Full explanation of each, with examples, below.
 
 ### `--dry-run`
 Preview only — prints what it *would* add to the spreadsheet, without
@@ -221,20 +235,82 @@ Caps how many Gmail messages the script will scan in one run (default
 tracker_venv/Scripts/python update_tracker.py --max-results 500
 ```
 
+### `--source {all|linkedin|dice}`
+Restrict this run to a single platform instead of scanning both. Only
+changes what's *fetched* — your existing rows from the other platform are
+never touched or removed. Defaults to `all`.
+```bash
+tracker_venv/Scripts/python update_tracker.py --source dice
+tracker_venv/Scripts/python update_tracker.py --source linkedin
+```
+
 ### Common combinations
 
+**Day-to-day use — no flags needed:**
 ```bash
-# Safe test: see what a full rebuild would produce, without saving anything
-tracker_venv/Scripts/python update_tracker.py --since 2026-06-24 --rebuild --dry-run
+# Pulls in whatever's new from both LinkedIn and Dice since last time,
+# merges with existing rows, re-sorts by date. This is what you'll run most often.
+tracker_venv/Scripts/python update_tracker.py
+```
 
-# Actually do that rebuild for real
+**Previewing before you trust a run:**
+```bash
+# See exactly what a normal run would add, without touching the spreadsheet
+tracker_venv/Scripts/python update_tracker.py --dry-run
+
+# Preview just the Dice side of things
+tracker_venv/Scripts/python update_tracker.py --source dice --dry-run
+
+# Preview a full rebuild before committing to it
+tracker_venv/Scripts/python update_tracker.py --since 2026-06-24 --rebuild --dry-run
+```
+
+**Rebuilding from scratch:**
+```bash
+# Full rebuild, entire Gmail history, both platforms
+tracker_venv/Scripts/python update_tracker.py --rebuild
+
+# Rebuild, but only recent applications (faster, smaller sheet)
 tracker_venv/Scripts/python update_tracker.py --since 2026-06-24 --rebuild
 
-# Normal day-to-day use — just pull in whatever's new since last time
-tracker_venv/Scripts/python update_tracker.py
+# Rebuild only the Dice rows' worth of data — e.g. after fixing a Dice
+# parsing bug, without forcing LinkedIn to be re-scanned too
+tracker_venv/Scripts/python update_tracker.py --source dice --since 2026-06-24 --rebuild
+```
+Note: `--rebuild` always deletes/recreates the *entire* spreadsheet file
+first (see the `--rebuild` section above), so combining it with `--source
+dice` still wipes LinkedIn rows too — they just won't get re-added in that
+run. Use this combo only if you plan to run `--source linkedin --rebuild`
+right after, or don't mind re-running the other source separately.
 
-# Quick sync, skip the slower hiring-manager lookup
+**Working with just one platform:**
+```bash
+# Only sync new Dice applications, leave LinkedIn alone
+tracker_venv/Scripts/python update_tracker.py --source dice
+
+# Only sync new LinkedIn applications, leave Dice alone
+tracker_venv/Scripts/python update_tracker.py --source linkedin
+
+# Preview only recent Dice applications, skip hiring-manager lookup for speed
+tracker_venv/Scripts/python update_tracker.py --source dice --since 2026-06-29 --no-hiring-manager --dry-run
+```
+
+**Faster, lighter runs:**
+```bash
+# Skip the Sent-mail hiring-manager lookup entirely (much faster)
 tracker_venv/Scripts/python update_tracker.py --no-hiring-manager
+
+# Combine with --source and --since for the fastest possible sync
+tracker_venv/Scripts/python update_tracker.py --source dice --since 2026-07-01 --no-hiring-manager
+```
+
+**Testing safely on a throwaway file:**
+```bash
+# Try a full rebuild against a test copy instead of your real tracker
+tracker_venv/Scripts/python update_tracker.py --tracker data/test_copy.xlsx --rebuild
+
+# Test only the Dice source against that same throwaway file
+tracker_venv/Scripts/python update_tracker.py --tracker data/test_copy.xlsx --source dice
 ```
 
 ---
@@ -247,9 +323,9 @@ tracker_venv/Scripts/python update_tracker.py --no-hiring-manager
 | Date | Yes | The date you applied, from the email |
 | Title | Yes | Job title |
 | Company Full Name | Yes | Company name |
-| Applied In Linkedin | Yes | Always "Yes" for emails found this way |
-| Website Applied | Yes | Shortened link straight to the job posting |
-| Hiring Manager In Linkedin | Sometimes | Only if a matching Sent email was found on the same date. If you emailed multiple people at that company that day (To **or** Cc), all of them are listed here, separated by `; ` |
+| Platform | Yes | `LinkedIn` or `Dice`, depending on which email it came from |
+| Website Applied | LinkedIn only | Shortened link straight to the job posting. Dice's emails don't include a job-specific link, so this is blank for Dice rows |
+| Hiring Manager In Linkedin | Sometimes | Only if a matching Sent email was found on the same date, for either platform. If you emailed multiple people at that company that day (To **or** Cc), all of them are listed here, separated by `; ` |
 | Company Email | Sometimes | Same matches as above, in the same order, also `; `-separated |
 | Contact Number For Job Post | No | Left blank for you to fill in |
 | Comment Section | No | Left blank for you to fill in |
@@ -298,7 +374,8 @@ Linkedin_Tracker/
 ├── tracker_venv/            # virtual environment (not committed to Git)
 ├── linkedin_tracker/        # the actual code: Gmail login, email parsing, matching
 │   ├── gmail_client.py
-│   ├── parser.py
+│   ├── parser.py            # LinkedIn email parsing
+│   ├── dice_parser.py       # Dice email parsing
 │   └── sent_matcher.py
 ├── data/
 │   ├── LinkedIn_Job_Tracker.xlsx              # the tracker you open/edit

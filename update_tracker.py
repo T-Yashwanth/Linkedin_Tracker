@@ -9,19 +9,62 @@ from dateutil import parser as dateparser
 
 from linkedin_tracker.gmail_client import get_gmail_service
 from linkedin_tracker.parser import get_html_body, parse_application_email
+from linkedin_tracker.dice_parser import parse_dice_subject
 from linkedin_tracker.sent_matcher import fetch_sent_index, find_hiring_managers
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROCESSED_FILE = os.path.join(BASE_DIR, 'processed_ids.json')
 DEFAULT_TRACKER = os.path.join(BASE_DIR, 'data', 'LinkedIn_Job_Tracker.xlsx')
 
-QUERY_BASE = 'from:jobs-noreply@linkedin.com "your application was sent to"'
+
+def parse_linkedin_message(msg, headers):
+    subject = headers.get('Subject', '')
+    html = get_html_body(msg['payload'])
+    data = parse_application_email(subject, html)
+    return {
+        'company': data['company'],
+        'title': data['title'],
+        'applied_date': data['applied_date'],
+        'job_link': data['job_link'],
+    }
+
+
+def parse_dice_message(msg, headers):
+    subject = headers.get('Subject', '')
+    data = parse_dice_subject(subject)
+    return {
+        'company': data['company'],
+        'title': data['title'],
+        'applied_date': None,
+        'job_link': None,
+    }
+
+
+SOURCES = [
+    {
+        'label': 'LinkedIn',
+        'query': 'from:jobs-noreply@linkedin.com "your application was sent to"',
+        'parse': parse_linkedin_message,
+        'source_value': 'LinkedIn',
+    },
+    {
+        'label': 'Dice',
+        'query': 'from:applyonline@dice.com "Application for"',
+        'parse': parse_dice_message,
+        'source_value': 'Dice',
+    },
+]
+SOURCES_BY_LABEL = {s['label'].lower(): s for s in SOURCES}
 
 HEADERS = [
-    'S.no', 'Date', 'Title', 'Company Full Name', 'Applied In Linkedin',
+    'S.no', 'Date', 'Title', 'Company Full Name', 'Platform',
     'Website Applied', 'Hiring Manager In Linkedin', 'Company Email',
     'Contact Number For Job Post', 'Comment Section',
 ]
+
+# Older trackers stored 'Yes' in the platform column back when LinkedIn was
+# the only source; normalize that to the source label on every run.
+LEGACY_PLATFORM_VALUES = {'yes': 'LinkedIn'}
 COLUMN_WIDTHS = {'D': 15.5, 'E': 14.3, 'F': 17.2, 'G': 15.8, 'H': 13.3, 'I': 22.4, 'J': 17.8}
 
 
@@ -54,7 +97,11 @@ def ensure_tracker(path, rebuild):
         os.remove(path)
     if not os.path.exists(path):
         create_blank_tracker(path)
-    return openpyxl.load_workbook(path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb.active
+    for col, header in enumerate(HEADERS, start=1):
+        ws.cell(row=1, column=col, value=header)
+    return wb
 
 
 def last_data_row(ws):
@@ -85,16 +132,15 @@ def main():
     ap.add_argument('--rebuild', action='store_true', help='Start the tracker fresh instead of appending')
     ap.add_argument('--no-hiring-manager', action='store_true', help='Skip matching hiring manager name/email from Sent mail')
     ap.add_argument('--dry-run', action='store_true', help='Parse and print results without writing to xlsx')
+    ap.add_argument('--source', choices=['all'] + list(SOURCES_BY_LABEL), default='all',
+                     help='Only fetch new applications from this source (default: all)')
     args = ap.parse_args()
 
     since_date = dateparser.parse(args.since).date() if args.since else None
+    active_sources = SOURCES if args.source == 'all' else [SOURCES_BY_LABEL[args.source]]
 
     service = get_gmail_service()
     processed = set() if args.rebuild else load_processed()
-
-    query = QUERY_BASE
-    if since_date:
-        query += f' after:{since_date.strftime("%Y/%m/%d")}'
 
     wb = None if args.dry_run else ensure_tracker(args.tracker, args.rebuild)
     ws = wb.active if wb else None
@@ -104,6 +150,9 @@ def main():
         last_row = last_data_row(ws)
         for r in range(2, last_row + 1):
             values = [ws.cell(row=r, column=c).value for c in range(2, 11)]
+            platform = values[3]
+            if isinstance(platform, str) and platform.strip().lower() in LEGACY_PLATFORM_VALUES:
+                values[3] = LEGACY_PLATFORM_VALUES[platform.strip().lower()]
             date_str = values[0]
             try:
                 row_date = dateparser.parse(date_str).date() if date_str else datetime.max.date()
@@ -112,9 +161,6 @@ def main():
             existing_rows.append({'date': row_date, 'values': values})
         if last_row >= 2:
             ws.delete_rows(2, last_row - 1)
-
-    messages = fetch_all_messages(service, query, args.max_results)
-    print(f'Found {len(messages)} matching email(s) in Gmail.')
 
     sent_index = []
     if not args.no_hiring_manager:
@@ -127,60 +173,66 @@ def main():
     new_count = 0
     skipped_unparsed = 0
 
-    for m in messages:
-        msg_id = m['id']
-        if msg_id in processed:
-            continue
+    for source in active_sources:
+        query = source['query']
+        if since_date:
+            query += f' after:{since_date.strftime("%Y/%m/%d")}'
 
-        msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()
-        headers = {h['name']: h['value'] for h in msg['payload'].get('headers', [])}
-        subject = headers.get('Subject', '')
-        html = get_html_body(msg['payload'])
-        data = parse_application_email(subject, html)
+        messages = fetch_all_messages(service, query, args.max_results)
+        print(f"Found {len(messages)} matching {source['label']} email(s) in Gmail.")
 
-        if not data['company']:
-            skipped_unparsed += 1
-            processed.add(msg_id)
-            continue
+        for m in messages:
+            msg_id = m['id']
+            if msg_id in processed:
+                continue
 
-        if data['applied_date']:
-            try:
-                applied_dt = dateparser.parse(data['applied_date'])
-            except (ValueError, OverflowError):
+            msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()
+            headers = {h['name']: h['value'] for h in msg['payload'].get('headers', [])}
+            data = source['parse'](msg, headers)
+
+            if not data['company']:
+                skipped_unparsed += 1
+                processed.add(msg_id)
+                continue
+
+            if data['applied_date']:
+                try:
+                    applied_dt = dateparser.parse(data['applied_date'])
+                except (ValueError, OverflowError):
+                    applied_dt = datetime.fromtimestamp(int(msg['internalDate']) / 1000)
+            else:
                 applied_dt = datetime.fromtimestamp(int(msg['internalDate']) / 1000)
-        else:
-            applied_dt = datetime.fromtimestamp(int(msg['internalDate']) / 1000)
 
-        if since_date and applied_dt.date() < since_date:
+            if since_date and applied_dt.date() < since_date:
+                processed.add(msg_id)
+                continue
+
+            hiring_managers = []
+            if not args.no_hiring_manager:
+                hiring_managers = find_hiring_managers(data['company'], applied_dt.date(), sent_index)
+
+            hm_names = '; '.join(hm['name'] for hm in hiring_managers)
+            hm_emails = '; '.join(hm['email'] for hm in hiring_managers)
+
+            if args.dry_run:
+                hm = f" | HM: {hm_names} <{hm_emails}>" if hiring_managers else ''
+                print(source['label'], '|', applied_dt.strftime('%m/%d/%Y'), '|', data['company'], '|', data['title'], '|', data['job_link'], hm)
+            else:
+                values = [
+                    applied_dt.strftime('%m/%d/%Y'),
+                    data['title'] or '',
+                    data['company'] or '',
+                    source['source_value'],
+                    data['job_link'] or '',
+                    hm_names,
+                    hm_emails,
+                    None,
+                    None,
+                ]
+                new_rows.append({'date': applied_dt.date(), 'values': values})
+
+            new_count += 1
             processed.add(msg_id)
-            continue
-
-        hiring_managers = []
-        if not args.no_hiring_manager:
-            hiring_managers = find_hiring_managers(data['company'], applied_dt.date(), sent_index)
-
-        hm_names = '; '.join(hm['name'] for hm in hiring_managers)
-        hm_emails = '; '.join(hm['email'] for hm in hiring_managers)
-
-        if args.dry_run:
-            hm = f" | HM: {hm_names} <{hm_emails}>" if hiring_managers else ''
-            print(applied_dt.strftime('%m/%d/%Y'), '|', data['company'], '|', data['title'], '|', data['job_link'], hm)
-        else:
-            values = [
-                applied_dt.strftime('%m/%d/%Y'),
-                data['title'] or '',
-                data['company'] or '',
-                'Yes',
-                data['job_link'] or '',
-                hm_names,
-                hm_emails,
-                None,
-                None,
-            ]
-            new_rows.append({'date': applied_dt.date(), 'values': values})
-
-        new_count += 1
-        processed.add(msg_id)
 
     if not args.dry_run:
         all_rows = existing_rows + new_rows
