@@ -7,6 +7,12 @@ date, platform, and (for LinkedIn) a link back to the job posting. If it can
 also find an email you personally sent to someone at that company on the
 same day, it fills in that person's name and email address too.
 
+Optionally, it can also log every recruiter/contact you've personally
+emailed on a real company domain that *isn't* already tied to one of those
+applications — e.g. someone you reached out to about a role you heard about
+from a LinkedIn post, a friend, or anywhere else. See
+[Reach-out contact tracking](#reach-out-contact-tracking) below.
+
 You run it from a terminal (a command-line window) on your own computer.
 It never sends or deletes anything in your Gmail — it only reads.
 
@@ -165,7 +171,8 @@ Quick reference:
 | `--no-hiring-manager` | no | off | Skip the Sent-mail lookup (faster, leaves those columns blank) |
 | `--tracker` | yes, a file path | `data/LinkedIn_Job_Tracker.xlsx` | Which spreadsheet file to read/write |
 | `--max-results` | yes, a number | `2000` | Cap on how many Gmail messages to scan |
-| `--source` | yes, `all`/`linkedin`/`dice` | `all` | Only fetch from one platform |
+| `--source` | yes, `all`/`linkedin`/`dice`/`reachout` | `all` | Only fetch from one platform (or only reach-out contacts) |
+| `--include-reachout` | no | off | Also log reach-out contacts alongside LinkedIn/Dice, in the same run |
 
 Full explanation of each, with examples, below.
 
@@ -235,13 +242,27 @@ Caps how many Gmail messages the script will scan in one run (default
 tracker_venv/Scripts/python update_tracker.py --max-results 500
 ```
 
-### `--source {all|linkedin|dice}`
-Restrict this run to a single platform instead of scanning both. Only
-changes what's *fetched* — your existing rows from the other platform are
-never touched or removed. Defaults to `all`.
+### `--source {all|linkedin|dice|reachout}`
+Restrict this run to a single platform instead of scanning both LinkedIn and
+Dice. Only changes what's *fetched* — your existing rows from other
+platforms are never touched or removed. Defaults to `all` (LinkedIn + Dice,
+but **not** reach-out contacts — that one is opt-in only, see below).
 ```bash
 tracker_venv/Scripts/python update_tracker.py --source dice
 tracker_venv/Scripts/python update_tracker.py --source linkedin
+tracker_venv/Scripts/python update_tracker.py --source reachout
+```
+`--source reachout` runs *only* the reach-out contact scan (see next
+section) — it skips the LinkedIn/Dice email search entirely.
+
+### `--include-reachout`
+Adds the reach-out contact scan on top of whatever `--source` you chose
+(default `all`, so normally this means "LinkedIn + Dice + reach-out
+contacts, all in one run"). Off by default — you have to opt in. See
+[Reach-out contact tracking](#reach-out-contact-tracking) for the full
+explanation of what this does and its limitations before turning it on.
+```bash
+tracker_venv/Scripts/python update_tracker.py --include-reachout
 ```
 
 ### Common combinations
@@ -313,6 +334,70 @@ tracker_venv/Scripts/python update_tracker.py --tracker data/test_copy.xlsx --re
 tracker_venv/Scripts/python update_tracker.py --tracker data/test_copy.xlsx --source dice
 ```
 
+**Reach-out contact tracking:**
+```bash
+# Preview only, only recent contacts, no LinkedIn/Dice fetching
+tracker_venv/Scripts/python update_tracker.py --source reachout --since 2026-06-24 --dry-run
+
+# Write those reach-out contacts for real
+tracker_venv/Scripts/python update_tracker.py --source reachout --since 2026-06-24
+
+# One run that does everything: LinkedIn + Dice applications AND reach-out contacts
+tracker_venv/Scripts/python update_tracker.py --include-reachout
+
+# Same, but scoped to recent activity only
+tracker_venv/Scripts/python update_tracker.py --include-reachout --since 2026-06-24
+```
+
+---
+
+## Reach-out contact tracking
+
+Beyond application-confirmation emails, you might also personally email
+recruiters about roles you heard about from a LinkedIn post, a friend, a
+referral, or anywhere else — with no automated confirmation email to detect.
+This feature logs those contacts too, using your **Sent** mail as the
+source instead of an inbox confirmation.
+
+**How it decides what counts as a reach-out contact:**
+- It looks at everyone you've sent an email **To** or **Cc'd** on a real
+  company domain (personal providers like Gmail/Yahoo/Outlook are always
+  excluded, same as the hiring-manager matching for LinkedIn/Dice).
+- It skips anyone whose email address is **already** in the spreadsheet's
+  "Company Email" column — whether that's from an existing LinkedIn/Dice
+  hiring-manager match, a previous reach-out run, or something you typed in
+  by hand. This is how re-runs avoid creating duplicate rows for people
+  you've already logged.
+- Each remaining, unique email address becomes **one row**, using the
+  earliest date you emailed them (even if you emailed them again on a later
+  date, it won't create a second row).
+
+**What gets filled in for these rows:**
+- **Platform** — always `Email Reach Out` (distinct from `LinkedIn`/`Dice`,
+  so you can filter/sort to see just these).
+- **Hiring Manager In Linkedin** / **Company Email** — the contact's name
+  (from the display name on your email, or guessed from their address) and
+  email address.
+- **Company Full Name** — a rough guess from their email domain (e.g.
+  `gravityitresources.com` → "Gravityitresources"). This is **not**
+  reliable — it's just a starting point. Expect to clean these up by hand.
+- **Title**, **Website Applied** — always blank; there's no job posting
+  tied to a reach-out contact.
+- **Date** — the day you first emailed them, not necessarily the day you
+  learned about the role.
+
+**Known limitations — read before turning this on:**
+- It has no way to know the role, or how you found out about it (LinkedIn
+  post, friend, referral, etc.) — that part is always on you to fill in
+  manually in the Comment Section.
+- It can't tell a recruiter apart from any other professional contact on a
+  company domain — vendors, colleagues, anyone. The domain filter cuts out
+  personal email providers, but not false positives within real companies.
+- High-volume staffing firms can generate a lot of rows — every individual
+  recruiter you've ever emailed at, say, TekSystems becomes its own row.
+- This is newer and less tested than the LinkedIn/Dice matching. Run it
+  with `--dry-run` first and review the output before writing it for real.
+
 ---
 
 ## What each spreadsheet column means
@@ -320,13 +405,13 @@ tracker_venv/Scripts/python update_tracker.py --tracker data/test_copy.xlsx --so
 | Column | Filled automatically? | Notes |
 |---|---|---|
 | S.no | Yes | Renumbered every run, in date order |
-| Date | Yes | The date you applied, from the email |
-| Title | Yes | Job title |
-| Company Full Name | Yes | Company name |
-| Platform | Yes | `LinkedIn` or `Dice`, depending on which email it came from |
-| Website Applied | LinkedIn only | Shortened link straight to the job posting. Dice's emails don't include a job-specific link, so this is blank for Dice rows |
-| Hiring Manager In Linkedin | Sometimes | Only if a matching Sent email was found on the same date, for either platform. If you emailed multiple people at that company that day (To **or** Cc), all of them are listed here, separated by `; ` |
-| Company Email | Sometimes | Same matches as above, in the same order, also `; `-separated |
+| Date | Yes | Application rows: the date you applied. Reach-out rows: the date you first emailed that contact |
+| Title | LinkedIn/Dice only | Job title. Always blank for reach-out rows (no job tied to them) |
+| Company Full Name | Yes | Application rows: company name from the email. Reach-out rows: a rough guess from the contact's email domain — verify/correct by hand |
+| Platform | Yes | `LinkedIn`, `Dice`, or `Email Reach Out` |
+| Website Applied | LinkedIn only | Shortened link straight to the job posting. Always blank for Dice and reach-out rows (no job-specific link available) |
+| Hiring Manager In Linkedin | Sometimes | Application rows: only if a matching Sent email was found on the same date. If you emailed multiple people at that company that day (To **or** Cc), all of them are listed here, separated by `; `. Reach-out rows: always filled — the contact's name |
+| Company Email | Sometimes | Application rows: same matches as above, `; `-separated. Reach-out rows: always filled — the contact's email |
 | Contact Number For Job Post | No | Left blank for you to fill in |
 | Comment Section | No | Left blank for you to fill in |
 
@@ -364,6 +449,14 @@ as a test user on the OAuth consent screen.
 **"Gmail API has not been used in project..." error** — Go back to Google
 Cloud Console and make sure you clicked **Enable** on the Gmail API
 (Step 2, item 3).
+
+**Too many irrelevant reach-out rows (`--include-reachout` / `--source
+reachout`)** — This scan can't distinguish recruiters from any other
+company-domain contact you've emailed. Delete the rows you don't want; that
+alone stops them from reappearing, since already-present "Company Email"
+values are skipped on future runs. If it's consistently noisy, don't use
+`--include-reachout` on your regular runs — only run `--source reachout`
+occasionally and review with `--dry-run` first.
 
 ---
 
