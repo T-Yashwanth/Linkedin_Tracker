@@ -1,16 +1,302 @@
 # LinkedIn Application Tracker
 
-Scans Gmail for LinkedIn "your application was sent to X" confirmation
-emails, matches a hiring manager name/email from your Sent folder when
-possible, and keeps an Excel tracker updated (sorted by date, no duplicates,
-manual edits preserved).
+This tool reads your Gmail inbox, finds the "Your application was sent to
+[Company]" emails LinkedIn sends every time you apply to a job, and
+automatically fills an Excel spreadsheet with the company name, job title,
+date, and a link back to the job posting. If it can also find an email you
+personally sent to someone at that company on the same day, it fills in
+that person's name and email address too.
+
+You run it from a terminal (a command-line window) on your own computer.
+It never sends or deletes anything in your Gmail — it only reads.
+
+---
+
+## Before you start: things you need installed
+
+1. **Python** (version 3.9 or newer). Check if you already have it by
+   opening a terminal and running:
+   ```
+   python --version
+   ```
+   If that fails, download Python from [python.org/downloads](https://www.python.org/downloads/)
+   and install it (on Windows, tick "Add Python to PATH" during install).
+
+2. **Git** (only needed if you're cloning from GitHub rather than
+   downloading a ZIP). Get it from [git-scm.com](https://git-scm.com/downloads).
+
+3. **A terminal.** On Windows you can use **Command Prompt (cmd)** or
+   **Git Bash** (installed alongside Git). This README gives commands for
+   both — use whichever one you have open.
+
+4. **Excel** (or any spreadsheet app that opens `.xlsx` files), to view the
+   tracker once it's filled in.
+
+---
+
+## Step 1 — Get the project onto your computer
+
+**Option A — Download as ZIP (easiest, no Git knowledge needed):**
+On the GitHub page for this project, click the green **Code** button →
+**Download ZIP**, then extract it anywhere on your computer (e.g. your
+Documents folder).
+
+**Option B — Fork and clone (if you want your own copy on GitHub too):**
+1. Click **Fork** on the GitHub page — this creates a copy of the project
+   under your own GitHub account.
+2. On your fork's page, click **Code** → copy the HTTPS URL.
+3. In a terminal, run:
+   ```bash
+   git clone <paste the URL you copied>
+   cd Linkedin_Tracker
+   ```
+
+**Option C — Just clone the original (if you don't need your own fork):**
+```bash
+git clone https://github.com/T-Yashwanth/Linkedin_Tracker.git
+cd Linkedin_Tracker
+```
+
+From here on, every command assumes your terminal is open **inside the
+`Linkedin_Tracker` folder**.
+
+---
+
+## Step 2 — Create a Gmail API credential (one-time, ~5 minutes)
+
+This tool needs your permission to read your Gmail. Google requires every
+app to register itself first — this step creates that registration.
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/) and sign
+   in with the Google account whose Gmail you want to scan.
+2. Create a new project (top-left project dropdown → **New Project** → give
+   it any name, e.g. "Job Tracker").
+3. Go to [APIs & Services → Library](https://console.cloud.google.com/apis/library/gmail.googleapis.com),
+   search for **Gmail API**, and click **Enable**.
+4. Go to **APIs & Services → OAuth consent screen**. Choose **External**,
+   fill in the required fields (app name, your email), and save. When asked
+   for "test users," add your own Gmail address.
+5. Go to **APIs & Services → Credentials** → **Create Credentials** →
+   **OAuth client ID**. For "Application type," choose **Desktop app**, give
+   it any name, and click **Create**.
+6. Click **Download JSON** on the credential you just created.
+7. Inside the project folder, create a folder called `secrets` (if it
+   doesn't already exist), and put the downloaded file there, renamed to
+   exactly `credentials.json`. It should end up at:
+   ```
+   Linkedin_Tracker/secrets/credentials.json
+   ```
+
+You only need to do this once. `credentials.json` is specific to you —
+never share it or upload it anywhere public.
+
+---
+
+## Step 3 — Set up the Python environment
+
+A "virtual environment" is just an isolated folder that holds the exact
+Python packages this project needs, so it doesn't interfere with anything
+else on your computer. We create one called `tracker_venv`.
+
+**Command Prompt (cmd):**
+```cmd
+python -m venv tracker_venv
+tracker_venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+**Git Bash:**
+```bash
+python -m venv tracker_venv
+source tracker_venv/Scripts/activate
+pip install -r requirements.txt
+```
+
+You'll know it worked if your terminal prompt now shows `(tracker_venv)` at
+the start of the line, and the `pip install` finishes with no red error
+text. You only need to do this once — or again if `requirements.txt`
+changes in a future update.
+
+---
+
+## Step 4 — Run it
+
+**Command Prompt (cmd):**
+```cmd
+tracker_venv\Scripts\python update_tracker.py
+```
+
+**Git Bash:**
+```bash
+tracker_venv/Scripts/python update_tracker.py
+```
+
+What happens the first time:
+1. Your web browser opens automatically, asking you to sign in to the
+   Google account you want to scan and approve **read-only** Gmail access.
+2. After you approve, the browser tab can be closed — the terminal takes
+   over automatically. This creates `secrets/token.json`, so you won't be
+   asked to log in again on future runs.
+3. If `data/LinkedIn_Job_Tracker.xlsx` doesn't exist yet, it's created
+   automatically with the right column headers — you don't need to make
+   this file yourself.
+4. It searches your Gmail, parses each application email, tries to find a
+   matching hiring-manager email from your Sent folder, and writes
+   everything into the spreadsheet — sorted by date.
+
+**Important:** close the tracker `.xlsx` file in Excel before running the
+script. Excel locks the file while it's open, so the script can't save
+changes to it and will show a permission error.
+
+---
+
+## Understanding the flags
+
+A "flag" is an extra option you type after `update_tracker.py` to change
+how it behaves. You can combine several at once.
+
+### `--dry-run`
+Preview only — prints what it *would* add to the spreadsheet, without
+actually writing anything or changing any files. Use this to sanity-check
+before a real run, especially the first time or after changing something.
+```bash
+tracker_venv/Scripts/python update_tracker.py --dry-run
+```
+
+### `--since YYYY-MM-DD`
+Only look at applications on or after this date. Speeds things up a lot on
+a large mailbox, since it also narrows the Gmail search itself (not just
+what gets written to the spreadsheet).
+```bash
+tracker_venv/Scripts/python update_tracker.py --since 2026-06-24
+```
+
+### `--rebuild`
+**Use this whenever the tracker file is missing, was deleted, or you want
+to force everything to be re-imported from scratch.** Normally, once an
+email has been read by the script, its ID gets saved in `processed_ids.json`
+so it's never re-imported again — that file, not the spreadsheet, is the
+script's memory of "what's already been done." This means:
+
+> ⚠️ **If you delete `data/LinkedIn_Job_Tracker.xlsx` but leave
+> `processed_ids.json` untouched, and then run the script normally, you'll
+> end up with an empty spreadsheet.** The script will recreate a blank
+> file, look at Gmail, see that every application email is already marked
+> "processed," and skip all of them — nothing gets written.
+
+`--rebuild` fixes this: it deletes/recreates the spreadsheet **and**
+temporarily ignores `processed_ids.json` for that run, so every matching
+email is treated as new again. At the end, `processed_ids.json` is
+rewritten to match whatever ended up in the spreadsheet.
+```bash
+tracker_venv/Scripts/python update_tracker.py --rebuild
+```
+If you only want to rebuild a recent window (not your entire Gmail
+history), combine it with `--since`:
+```bash
+tracker_venv/Scripts/python update_tracker.py --since 2026-06-24 --rebuild
+```
+
+### `--no-hiring-manager`
+Skips the step that scans your Sent folder to guess hiring-manager names
+and emails. This makes the run noticeably faster, but the "Hiring Manager
+In Linkedin" and "Company Email" columns will be left blank. Use this if
+you don't need that lookup, or just want a quick sync.
+```bash
+tracker_venv/Scripts/python update_tracker.py --no-hiring-manager
+```
+
+### `--tracker <path>`
+Read/write a different spreadsheet file instead of the default
+`data/LinkedIn_Job_Tracker.xlsx`. Handy for testing on a throwaway copy
+before trusting a real run.
+```bash
+tracker_venv/Scripts/python update_tracker.py --tracker data/test_copy.xlsx
+```
+
+### `--max-results N`
+Caps how many Gmail messages the script will scan in one run (default
+2000). You'll rarely need to change this — it's mainly a safety limit.
+```bash
+tracker_venv/Scripts/python update_tracker.py --max-results 500
+```
+
+### Common combinations
+
+```bash
+# Safe test: see what a full rebuild would produce, without saving anything
+tracker_venv/Scripts/python update_tracker.py --since 2026-06-24 --rebuild --dry-run
+
+# Actually do that rebuild for real
+tracker_venv/Scripts/python update_tracker.py --since 2026-06-24 --rebuild
+
+# Normal day-to-day use — just pull in whatever's new since last time
+tracker_venv/Scripts/python update_tracker.py
+
+# Quick sync, skip the slower hiring-manager lookup
+tracker_venv/Scripts/python update_tracker.py --no-hiring-manager
+```
+
+---
+
+## What each spreadsheet column means
+
+| Column | Filled automatically? | Notes |
+|---|---|---|
+| S.no | Yes | Renumbered every run, in date order |
+| Date | Yes | The date you applied, from the email |
+| Title | Yes | Job title |
+| Company Full Name | Yes | Company name |
+| Applied In Linkedin | Yes | Always "Yes" for emails found this way |
+| Website Applied | Yes | Shortened link straight to the job posting |
+| Hiring Manager In Linkedin | Sometimes | Only if a matching Sent email was found on the same date |
+| Company Email | Sometimes | Same as above |
+| Contact Number For Job Post | No | Left blank for you to fill in |
+| Comment Section | No | Left blank for you to fill in |
+
+Every run **preserves anything you've typed in by hand** — manual notes,
+contact numbers, corrected names, even entire rows you added yourself.
+The script merges your existing data with newly found applications and
+re-sorts by date; it never throws away what's already there (unless you
+use `--rebuild`, which starts over).
+
+---
+
+## Running it again later
+
+Just run the same command again whenever you want to pull in new
+applications — it's safe to run as often as you like, duplicates are never
+added twice. If you want it to run automatically (e.g. every morning), you
+can set it up as a scheduled task using Windows Task Scheduler.
+
+---
+
+## Troubleshooting
+
+**"PermissionError" / can't save the file** — Close the tracker `.xlsx` in
+Excel first; Excel locks the file while open.
+
+**Spreadsheet came out empty after a run** — See the `--rebuild`
+explanation above; you likely deleted the xlsx without also passing
+`--rebuild`.
+
+**Browser doesn't open / login fails** — Double check
+`secrets/credentials.json` exists and is the file you downloaded from
+Google Cloud Console (see Step 2), and that your Google account was added
+as a test user on the OAuth consent screen.
+
+**"Gmail API has not been used in project..." error** — Go back to Google
+Cloud Console and make sure you clicked **Enable** on the Gmail API
+(Step 2, item 3).
+
+---
 
 ## Project structure
 
 ```
 Linkedin_Tracker/
-├── tracker_venv/            # virtual environment (not committed)
-├── linkedin_tracker/        # package: Gmail auth, email parsing, matching
+├── tracker_venv/            # virtual environment (not committed to Git)
+├── linkedin_tracker/        # the actual code: Gmail login, email parsing, matching
 │   ├── gmail_client.py
 │   ├── parser.py
 │   └── sent_matcher.py
@@ -18,100 +304,22 @@ Linkedin_Tracker/
 │   ├── LinkedIn_Job_Tracker.xlsx              # the tracker you open/edit
 │   └── LinkedIn_Job_Tracker_full_history_backup.xlsx
 ├── secrets/
-│   ├── credentials.json     # OAuth client (not committed)
-│   └── token.json           # created after first login (not committed)
-├── update_tracker.py        # entry point — run this
-├── processed_ids.json       # tracks which emails were already imported
-└── requirements.txt
+│   ├── credentials.json     # your OAuth client (not committed to Git)
+│   └── token.json           # created after first login (not committed to Git)
+├── update_tracker.py        # the script you actually run
+├── processed_ids.json       # the script's memory of which emails it already imported
+└── requirements.txt         # list of Python packages this project needs
 ```
 
-## One-time setup
+---
 
-1. Get an OAuth client:
-   - In [Google Cloud Console](https://console.cloud.google.com/apis/library/gmail.googleapis.com),
-     enable the **Gmail API** for your project, create an **OAuth client ID**
-     (type: Desktop app), and download it as `secrets/credentials.json`.
-   - If the OAuth consent screen is in "Testing" status, add your own Google
-     account as a test user under that screen.
-2. Create the virtual environment and install dependencies.
+## Security & privacy notes
 
-### Command Prompt (cmd)
-```cmd
-cd path\to\Linkedin_Tracker
-python -m venv tracker_venv
-tracker_venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### Git Bash
-```bash
-cd /c/path/to/Linkedin_Tracker
-python -m venv tracker_venv
-source tracker_venv/Scripts/activate
-pip install -r requirements.txt
-```
-
-(Only needed once — or again after `requirements.txt` changes.)
-
-## Running it
-
-### Command Prompt (cmd)
-```cmd
-tracker_venv\Scripts\python update_tracker.py
-```
-
-### Git Bash
-```bash
-tracker_venv/Scripts/python update_tracker.py
-```
-
-- First run opens a browser window to sign in with your Google account and
-  approve read-only Gmail access. This creates `secrets/token.json`, which is
-  reused on future runs (no repeated logins).
-- If `data/LinkedIn_Job_Tracker.xlsx` doesn't exist yet, it's created
-  automatically with the correct headers — no template file needed.
-- Every run reads the whole sheet (including anything you filled in by hand),
-  merges in new applications, re-sorts everything by date ascending, and
-  rewrites the sheet — your manual edits and manually-added rows are kept.
-- Already-processed emails are recorded in `processed_ids.json`, so re-running
-  only pulls new applications since the last run.
-- **Close the xlsx in Excel before running** — an open file can't be saved to.
-
-Useful flags:
-- `--dry-run` — parse and print what would happen, without touching the xlsx.
-- `--tracker <path>` — write to a different xlsx file.
-- `--since YYYY-MM-DD` — only include applications on/after this date.
-- `--rebuild` — start the tracker fresh (blank headers) instead of merging.
-- `--no-hiring-manager` — skip matching hiring manager name/email from Sent mail.
-- `--max-results N` — limit how many Gmail messages to scan (default 2000).
-
-Example:
-```bash
-tracker_venv/Scripts/python update_tracker.py --since 2026-06-24 --rebuild
-```
-
-## What gets filled in
-
-For each application email:
-`S.no`, `Date`, `Title`, `Company Full Name`, `Applied In Linkedin` (`Yes`),
-`Website Applied` (shortened job link, opens the application directly).
-
-`Hiring Manager In Linkedin` and `Company Email` are auto-filled when a
-same-day Sent email to a matching company domain is found (name is taken from
-the email's display name, or guessed from the address itself, e.g.
-`dipankar.k@x.com` → "Dipankar K"). `Contact Number For Job Post` and
-`Comment Section` are left blank for you.
-
-## Re-running periodically
-
-Run it whenever you want to sync new applications — safe to run repeatedly.
-You can also schedule it (Windows Task Scheduler) to run daily.
-
-## Security notes
-
-- `secrets/credentials.json` is your OAuth client secret; `secrets/token.json`
-  (created after first login) holds your personal access/refresh token. Keep
-  both private — don't commit them to a public repo (`.gitignore` already
-  excludes `secrets/`).
-- The app only requests `gmail.readonly` scope — it can read email, not send
-  or delete anything.
+- `secrets/credentials.json` and `secrets/token.json` are personal to your
+  Google account. Never commit them to a public repository or share them —
+  `.gitignore` already excludes the whole `secrets/` folder for this reason.
+- The app only ever requests **read-only** Gmail access
+  (`gmail.readonly`) — it cannot send, delete, or modify any email.
+- Your tracker spreadsheet may contain personal application data (company
+  contacts, emails) — the `.gitignore` also excludes `data/*.xlsx` so it
+  isn't accidentally committed to Git either.
