@@ -1,0 +1,57 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+A CLI tool that reads the user's Gmail via the Gmail API (read-only scope), finds LinkedIn and Dice job-application confirmation emails, and writes them into an Excel tracker (`data/LinkedIn_Job_Tracker.xlsx`). It also cross-references the user's Sent folder to guess hiring-manager contacts for each application, and can separately log "reach-out" contacts (people emailed on a company domain with no matching application).
+
+## Running it
+
+```bash
+# Windows Command Prompt
+tracker_venv\Scripts\python update_tracker.py [flags]
+
+# Git Bash
+tracker_venv/Scripts/python update_tracker.py [flags]
+```
+
+There is no test suite, linter, or build step in this repo — verification is done via `--dry-run` against real Gmail data (see below).
+
+First run requires `secrets/credentials.json` (a Google OAuth Desktop-app client, downloaded from Google Cloud Console) to exist; it opens a browser for OAuth consent and writes `secrets/token.json`. Both files are gitignored and personal to the user's Google account — never fabricate, log, or commit their contents.
+
+### Key flags (see README.md for full details)
+- `--dry-run` — parse and print without writing to the xlsx or `processed_ids.json`. Use this to validate any change to parsing/matching logic before a real run.
+- `--rebuild` — deletes/recreates the tracker and ignores `processed_ids.json` for that run (otherwise already-processed message IDs are skipped forever). Combine with `--since` to limit scope.
+- `--source {all|linkedin|dice|reachout}` — restrict which source(s) are fetched.
+- `--since YYYY-MM-DD` — narrows both the Gmail query and what gets written.
+- `--no-hiring-manager` — skips the Sent-mail indexing step entirely (faster).
+- `--include-reachout` — also run the reach-out contact scan alongside whatever `--source` is fetching.
+
+When testing changes manually, prefer `--tracker data/test_copy.xlsx` (or `--dry-run`) over the real tracker file to avoid corrupting the user's actual data.
+
+## Architecture
+
+Single entry point: `update_tracker.py`. Everything else lives in `linkedin_tracker/` as focused, single-responsibility modules with no shared state beyond what's passed explicitly:
+
+- `gmail_client.py` — OAuth flow and `get_gmail_service()`, the only place that touches `secrets/`.
+- `parser.py` — parses LinkedIn's HTML email body (via BeautifulSoup) to extract company, title, applied date, and job link. Company is extracted from the *subject* line, not the body.
+- `dice_parser.py` — parses Dice's plain-text subject line (no HTML body worth parsing; no job link is ever available for Dice).
+- `sent_matcher.py` — builds an index of every To/Cc recipient across the user's Sent mail (`fetch_sent_index`), then does two independent things with it:
+  - `find_hiring_managers`: fuzzy-matches a company name against recipient domains on the *same calendar date* as the application (word-overlap scoring against `GENERIC_DOMAINS`-filtered, non-personal email domains).
+  - `find_reachout_contacts`: every distinct non-generic-domain recipient *not* already known (i.e., not already a hiring-manager match), one row per unique email using the earliest date seen.
+
+`update_tracker.py` orchestrates: fetch messages per source (LinkedIn/Dice queries are Gmail search strings) → parse → resolve applied date (parsed date, falling back to message internal timestamp) → optionally match hiring managers → merge with existing spreadsheet rows → re-sort by date → rewrite the whole sheet.
+
+### Data flow / state model
+
+Two persistent files gate behavior across runs:
+
+1. **`processed_ids.json`** (gitignored) — the set of Gmail message IDs already imported. This, not the spreadsheet, is the source of truth for "already handled." Deleting the xlsx without also passing `--rebuild` produces an empty sheet, because every source email is still marked processed and gets skipped. `--rebuild` clears this set for the run and rewrites it at the end to match whatever's in the sheet.
+2. **`data/LinkedIn_Job_Tracker.xlsx`** — columns are fixed (see `HEADERS` in `update_tracker.py`). Every run reads existing rows (`read_existing_rows`), merges in new rows, sorts the combined set by date, and rewrites rows 2..N in place — manual edits (comments, contact numbers, hand-added rows) are always preserved except under `--rebuild`. `LEGACY_PLATFORM_VALUES` silently migrates old `'Yes'` platform values (from when LinkedIn was the only source) to `'LinkedIn'` on every read.
+
+`--dry-run` mirrors the same read/merge logic (including reading existing rows for non-rebuild runs, so previews accurately reflect what a real run would add) but never opens the workbook for writing and never touches `processed_ids.json`.
+
+### Adding a new source
+
+Follow the `SOURCES` list pattern in `update_tracker.py`: a Gmail search query, a `parse_*` function returning `{company, title, applied_date, job_link}`, and a `source_value` for the Platform column. The rest of the pipeline (dedup via `processed_ids.json`, hiring-manager matching, merge/sort/write) is source-agnostic.

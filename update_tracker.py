@@ -115,6 +115,26 @@ def last_data_row(ws):
     return 1
 
 
+def read_existing_rows(ws):
+    """Read existing data rows (columns B-J) into a list of {'date',
+    'values'}, migrating legacy platform values along the way. Returns
+    (existing_rows, last_row)."""
+    existing_rows = []
+    last_row = last_data_row(ws)
+    for r in range(2, last_row + 1):
+        values = [ws.cell(row=r, column=c).value for c in range(2, 11)]
+        platform = values[3]
+        if isinstance(platform, str) and platform.strip().lower() in LEGACY_PLATFORM_VALUES:
+            values[3] = LEGACY_PLATFORM_VALUES[platform.strip().lower()]
+        date_str = values[0]
+        try:
+            row_date = dateparser.parse(date_str).date() if date_str else datetime.max.date()
+        except (ValueError, OverflowError):
+            row_date = datetime.max.date()
+        existing_rows.append({'date': row_date, 'values': values})
+    return existing_rows, last_row
+
+
 def fetch_all_messages(service, query, max_results):
     messages = []
     request = service.users().messages().list(userId='me', q=query, maxResults=min(max_results, 500))
@@ -150,23 +170,19 @@ def main():
     service = get_gmail_service()
     processed = set() if args.rebuild else load_processed()
 
-    wb = None if args.dry_run else ensure_tracker(args.tracker, args.rebuild)
-    ws = wb.active if wb else None
-
     existing_rows = []
-    if ws:
-        last_row = last_data_row(ws)
-        for r in range(2, last_row + 1):
-            values = [ws.cell(row=r, column=c).value for c in range(2, 11)]
-            platform = values[3]
-            if isinstance(platform, str) and platform.strip().lower() in LEGACY_PLATFORM_VALUES:
-                values[3] = LEGACY_PLATFORM_VALUES[platform.strip().lower()]
-            date_str = values[0]
-            try:
-                row_date = dateparser.parse(date_str).date() if date_str else datetime.max.date()
-            except (ValueError, OverflowError):
-                row_date = datetime.max.date()
-            existing_rows.append({'date': row_date, 'values': values})
+    if args.dry_run:
+        # Read-only preview: mirror what a real run would see, without
+        # creating or modifying the tracker file. A --rebuild run ignores
+        # existing data entirely, so the preview does too.
+        wb = None
+        ws = None
+        if not args.rebuild and os.path.exists(args.tracker):
+            existing_rows, _ = read_existing_rows(openpyxl.load_workbook(args.tracker).active)
+    else:
+        wb = ensure_tracker(args.tracker, args.rebuild)
+        ws = wb.active
+        existing_rows, last_row = read_existing_rows(ws)
         if last_row >= 2:
             ws.delete_rows(2, last_row - 1)
 
