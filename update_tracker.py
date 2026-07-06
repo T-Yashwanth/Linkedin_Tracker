@@ -14,7 +14,7 @@ from linkedin_tracker.sent_matcher import fetch_sent_index, find_hiring_managers
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROCESSED_FILE = os.path.join(BASE_DIR, 'processed_ids.json')
-DEFAULT_TRACKER = os.path.join(BASE_DIR, 'data', 'LinkedIn_Job_Tracker.xlsx')
+DEFAULT_TRACKER = os.path.join(BASE_DIR, 'data', 'Job_Tracker.xlsx')
 
 
 def parse_linkedin_message(msg, headers):

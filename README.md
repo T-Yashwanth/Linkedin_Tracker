@@ -143,7 +143,7 @@ What happens the first time:
 2. After you approve, the browser tab can be closed — the terminal takes
    over automatically. This creates `secrets/token.json`, so you won't be
    asked to log in again on future runs.
-3. If `data/LinkedIn_Job_Tracker.xlsx` doesn't exist yet, it's created
+3. If `data/Job_Tracker.xlsx` doesn't exist yet, it's created
    automatically with the right column headers — you don't need to make
    this file yourself.
 4. It searches your Gmail, parses each application email, tries to find a
@@ -169,7 +169,7 @@ Quick reference:
 | `--since` | yes, `YYYY-MM-DD` | none (all history) | Only include applications on/after this date |
 | `--rebuild` | no | off | Start the spreadsheet fresh, ignore `processed_ids.json` for this run |
 | `--no-hiring-manager` | no | off | Skip the Sent-mail lookup (faster, leaves those columns blank) |
-| `--tracker` | yes, a file path | `data/LinkedIn_Job_Tracker.xlsx` | Which spreadsheet file to read/write |
+| `--tracker` | yes, a file path | `data/Job_Tracker.xlsx` | Which spreadsheet file to read/write |
 | `--max-results` | yes, a number | `2000` | Cap on how many Gmail messages to scan |
 | `--source` | yes, `all`/`linkedin`/`dice`/`reachout` | `all` | Only fetch from one platform (or only reach-out contacts) |
 | `--include-reachout` | no | off | Also log reach-out contacts alongside LinkedIn/Dice, in the same run |
@@ -199,7 +199,7 @@ email has been read by the script, its ID gets saved in `processed_ids.json`
 so it's never re-imported again — that file, not the spreadsheet, is the
 script's memory of "what's already been done." This means:
 
-> ⚠️ **If you delete `data/LinkedIn_Job_Tracker.xlsx` but leave
+> ⚠️ **If you delete `data/Job_Tracker.xlsx` but leave
 > `processed_ids.json` untouched, and then run the script normally, you'll
 > end up with an empty spreadsheet.** The script will recreate a blank
 > file, look at Gmail, see that every application email is already marked
@@ -229,7 +229,7 @@ tracker_venv/Scripts/python update_tracker.py --no-hiring-manager
 
 ### `--tracker <path>`
 Read/write a different spreadsheet file instead of the default
-`data/LinkedIn_Job_Tracker.xlsx`. Handy for testing on a throwaway copy
+`data/Job_Tracker.xlsx`. Handy for testing on a throwaway copy
 before trusting a real run.
 ```bash
 tracker_venv/Scripts/python update_tracker.py --tracker data/test_copy.xlsx
@@ -471,7 +471,7 @@ Linkedin_Tracker/
 │   ├── dice_parser.py       # Dice email parsing
 │   └── sent_matcher.py
 ├── data/
-│   ├── LinkedIn_Job_Tracker.xlsx              # the tracker you open/edit
+│   ├── Job_Tracker.xlsx              # the tracker you open/edit
 │   └── LinkedIn_Job_Tracker_full_history_backup.xlsx
 ├── secrets/
 │   ├── credentials.json     # your OAuth client (not committed to Git)
