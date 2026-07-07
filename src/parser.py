@@ -18,6 +18,27 @@ def get_html_body(payload):
     return None
 
 
+def get_text_body(payload):
+    """Recursively find plain text content for a Gmail message payload.
+    Prefers an explicit text/plain part; falls back to stripping tags from
+    text/html if no text/plain part exists. Returns None if no text
+    content can be found."""
+    if payload.get('mimeType') == 'text/plain' and payload.get('body', {}).get('data'):
+        data = payload['body']['data']
+        return base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+
+    for part in payload.get('parts', []) or []:
+        text = get_text_body(part)
+        if text:
+            return text
+
+    html = get_html_body(payload)
+    if html:
+        return BeautifulSoup(html, 'lxml').get_text('\n', strip=True)
+
+    return None
+
+
 def parse_application_email(subject, html):
     """Extract company, title, location, applied date and job link from a
     LinkedIn 'your application was sent to X' notification email."""
