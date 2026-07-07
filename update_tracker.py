@@ -7,14 +7,15 @@ import openpyxl
 from openpyxl.styles import Font
 from dateutil import parser as dateparser
 
-from linkedin_tracker.gmail_client import get_gmail_service
-from linkedin_tracker.parser import get_html_body, parse_application_email
-from linkedin_tracker.dice_parser import parse_dice_subject
-from linkedin_tracker.sent_matcher import fetch_sent_index, find_hiring_managers, find_reachout_contacts
+from src.gmail_client import get_gmail_service
+from src.parser import get_html_body, parse_application_email
+from src.dice_parser import parse_dice_subject
+from src.sent_matcher import fetch_sent_index, find_hiring_managers, find_reachout_contacts
+from src.phone_lookup import find_phone_for_email
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROCESSED_FILE = os.path.join(BASE_DIR, 'processed_ids.json')
-DEFAULT_TRACKER = os.path.join(BASE_DIR, 'data', 'LinkedIn_Job_Tracker.xlsx')
+DEFAULT_TRACKER = os.path.join(BASE_DIR, 'data', 'Job_Tracker.xlsx')
 
 
 def parse_linkedin_message(msg, headers):
@@ -157,6 +158,8 @@ def main():
                      help='Only fetch new applications from this source (default: all)')
     ap.add_argument('--include-reachout', action='store_true',
                      help='Also log recruiters/contacts you emailed on a company domain that are not tied to an existing application')
+    ap.add_argument('--include-phone', action='store_true',
+                     help='Look up recruiter phone numbers from Inbox replies for hiring-manager and reach-out contacts, and backfill existing blank entries (slow: one extra Gmail search per unique contact email)')
     args = ap.parse_args()
 
     since_date = dateparser.parse(args.since).date() if args.since else None
@@ -199,6 +202,29 @@ def main():
         emails_cell = r['values'][6]
         if emails_cell:
             known_emails.update(e.strip() for e in str(emails_cell).split(';') if e.strip())
+
+    phone_cache = {}
+
+    def lookup_phone(email):
+        key = email.lower().strip()
+        if key not in phone_cache:
+            phone_cache[key] = find_phone_for_email(service, fetch_all_messages, key)
+        return phone_cache[key]
+
+    if args.include_phone:
+        print('Looking up recruiter phone numbers from Inbox replies (this can take a while)...')
+        for row in existing_rows:
+            values = row['values']
+            if values[7]:
+                continue
+            for email in (values[6] or '').split(';'):
+                email = email.strip()
+                if not email:
+                    continue
+                phone = lookup_phone(email)
+                if phone:
+                    values[7] = phone
+                    break
 
     new_rows = []
     new_count = 0
@@ -246,9 +272,18 @@ def main():
             hm_names = '; '.join(hm['name'] for hm in hiring_managers)
             hm_emails = '; '.join(hm['email'] for hm in hiring_managers)
 
+            hm_phone = ''
+            if args.include_phone:
+                for hm in hiring_managers:
+                    phone = lookup_phone(hm['email'])
+                    if phone:
+                        hm_phone = phone
+                        break
+
             if args.dry_run:
                 hm = f" | HM: {hm_names} <{hm_emails}>" if hiring_managers else ''
-                print(source['label'], '|', applied_dt.strftime('%m/%d/%Y'), '|', data['company'], '|', data['title'], '|', data['job_link'], hm)
+                phone_note = f" | Phone: {hm_phone}" if hm_phone else ''
+                print(source['label'], '|', applied_dt.strftime('%m/%d/%Y'), '|', data['company'], '|', data['title'], '|', data['job_link'], hm, phone_note)
             else:
                 values = [
                     applied_dt.strftime('%m/%d/%Y'),
@@ -258,7 +293,7 @@ def main():
                     data['job_link'] or '',
                     hm_names,
                     hm_emails,
-                    None,
+                    hm_phone or None,
                     None,
                 ]
                 new_rows.append({'date': applied_dt.date(), 'values': values})
@@ -272,8 +307,11 @@ def main():
         if since_date:
             contacts = [c for c in contacts if c['date'] >= since_date]
         for contact in contacts:
+            contact_phone = lookup_phone(contact['email']) if args.include_phone else None
+
             if args.dry_run:
-                print('Email Reach Out', '|', contact['date'].strftime('%m/%d/%Y'), '|', contact['company_guess'], '|', contact['name'], '|', contact['email'])
+                phone_note = f" | Phone: {contact_phone}" if contact_phone else ''
+                print('Email Reach Out', '|', contact['date'].strftime('%m/%d/%Y'), '|', contact['company_guess'], '|', contact['name'], '|', contact['email'], phone_note)
             else:
                 values = [
                     contact['date'].strftime('%m/%d/%Y'),
@@ -283,7 +321,7 @@ def main():
                     '',
                     contact['name'],
                     contact['email'],
-                    None,
+                    contact_phone,
                     None,
                 ]
                 new_rows.append({'date': contact['date'], 'values': values})
@@ -306,6 +344,11 @@ def main():
 
     if skipped_unparsed:
         print(f'Skipped {skipped_unparsed} email(s) that could not be parsed (marked as processed).')
+
+    if args.include_phone:
+        attempted = len(phone_cache)
+        found = sum(1 for v in phone_cache.values() if v)
+        print(f'Looked up phone numbers for {attempted} unique contact(s), found {found}.')
 
 
 if __name__ == '__main__':

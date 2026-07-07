@@ -13,6 +13,11 @@ applications — e.g. someone you reached out to about a role you heard about
 from a LinkedIn post, a friend, or anywhere else. See
 [Reach-out contact tracking](#reach-out-contact-tracking) below.
 
+It can also try to fill in a recruiter's phone number, by searching for
+replies they've actually sent you and pattern-matching a phone number out
+of the plain text (no AI/LLM involved — just regex). See
+[Phone number extraction](#phone-number-extraction) below.
+
 You run it from a terminal (a command-line window) on your own computer.
 It never sends or deletes anything in your Gmail — it only reads.
 
@@ -143,7 +148,7 @@ What happens the first time:
 2. After you approve, the browser tab can be closed — the terminal takes
    over automatically. This creates `secrets/token.json`, so you won't be
    asked to log in again on future runs.
-3. If `data/LinkedIn_Job_Tracker.xlsx` doesn't exist yet, it's created
+3. If `data/Job_Tracker.xlsx` doesn't exist yet, it's created
    automatically with the right column headers — you don't need to make
    this file yourself.
 4. It searches your Gmail, parses each application email, tries to find a
@@ -169,12 +174,25 @@ Quick reference:
 | `--since` | yes, `YYYY-MM-DD` | none (all history) | Only include applications on/after this date |
 | `--rebuild` | no | off | Start the spreadsheet fresh, ignore `processed_ids.json` for this run |
 | `--no-hiring-manager` | no | off | Skip the Sent-mail lookup (faster, leaves those columns blank) |
-| `--tracker` | yes, a file path | `data/LinkedIn_Job_Tracker.xlsx` | Which spreadsheet file to read/write |
+| `--tracker` | yes, a file path | `data/Job_Tracker.xlsx` | Which spreadsheet file to read/write |
 | `--max-results` | yes, a number | `2000` | Cap on how many Gmail messages to scan |
 | `--source` | yes, `all`/`linkedin`/`dice`/`reachout` | `all` | Only fetch from one platform (or only reach-out contacts) |
 | `--include-reachout` | no | off | Also log reach-out contacts alongside LinkedIn/Dice, in the same run |
+| `--include-phone` | no | off | Look up recruiter phone numbers and backfill blank Contact Number cells |
 
 Full explanation of each, with examples, below.
+
+> ⚠️ **`--since` does not limit `--include-phone`'s backfill.** Filling in
+> phone numbers for your *existing* rows always scans every row with a
+> blank Contact Number, regardless of `--since` — there's no need to drop
+> `--since` to "widen" the backfill. `--since` only controls which *new*
+> LinkedIn/Dice applications get fetched. Dropping `--since` entirely
+> re-fetches your **entire** Gmail history for LinkedIn/Dice/reach-out too —
+> and if `processed_ids.json` has ever been narrowed by an earlier
+> `--rebuild --since <date>` run, old applications from before that date can
+> silently reappear as "new" and get re-imported as duplicates. If you just
+> want phone numbers backfilled, keep whatever `--since` you'd normally use
+> (or drop it entirely only if you deliberately want a full history refetch).
 
 ### `--dry-run`
 Preview only — prints what it *would* add to the spreadsheet, without
@@ -199,7 +217,7 @@ email has been read by the script, its ID gets saved in `processed_ids.json`
 so it's never re-imported again — that file, not the spreadsheet, is the
 script's memory of "what's already been done." This means:
 
-> ⚠️ **If you delete `data/LinkedIn_Job_Tracker.xlsx` but leave
+> ⚠️ **If you delete `data/Job_Tracker.xlsx` but leave
 > `processed_ids.json` untouched, and then run the script normally, you'll
 > end up with an empty spreadsheet.** The script will recreate a blank
 > file, look at Gmail, see that every application email is already marked
@@ -229,7 +247,7 @@ tracker_venv/Scripts/python update_tracker.py --no-hiring-manager
 
 ### `--tracker <path>`
 Read/write a different spreadsheet file instead of the default
-`data/LinkedIn_Job_Tracker.xlsx`. Handy for testing on a throwaway copy
+`data/Job_Tracker.xlsx`. Handy for testing on a throwaway copy
 before trusting a real run.
 ```bash
 tracker_venv/Scripts/python update_tracker.py --tracker data/test_copy.xlsx
@@ -263,6 +281,17 @@ contacts, all in one run"). Off by default — you have to opt in. See
 explanation of what this does and its limitations before turning it on.
 ```bash
 tracker_venv/Scripts/python update_tracker.py --include-reachout
+```
+
+### `--include-phone`
+Looks up recruiter phone numbers and fills the "Contact Number For Job
+Post" column — both for contacts found in this run, and by backfilling any
+existing row that has a matched recruiter email but a blank Contact
+Number. Off by default. See
+[Phone number extraction](#phone-number-extraction) below for the full
+explanation, including real limitations worth reading before turning it on.
+```bash
+tracker_venv/Scripts/python update_tracker.py --include-phone
 ```
 
 ### Common combinations
@@ -349,6 +378,25 @@ tracker_venv/Scripts/python update_tracker.py --include-reachout
 tracker_venv/Scripts/python update_tracker.py --include-reachout --since 2026-06-24
 ```
 
+**Phone number lookup:**
+```bash
+# Preview only: backfill existing blank Contact Numbers + look up phones
+# for any new contacts found this run. --since here only limits what NEW
+# LinkedIn/Dice applications get fetched -- the backfill itself always
+# covers every existing row regardless.
+tracker_venv/Scripts/python update_tracker.py --include-phone --since 2026-06-24 --dry-run
+
+# Write it for real
+tracker_venv/Scripts/python update_tracker.py --include-phone --since 2026-06-24
+
+# Cheapest way to test just the phone lookup against a small, known set of
+# contacts before trusting it more broadly
+tracker_venv/Scripts/python update_tracker.py --source reachout --since 2026-06-24 --include-phone --dry-run
+
+# Full run: LinkedIn + Dice + reach-out + phone lookup/backfill, all at once
+tracker_venv/Scripts/python update_tracker.py --include-reachout --include-phone --since 2026-06-24
+```
+
 ---
 
 ## Reach-out contact tracking
@@ -400,6 +448,54 @@ source instead of an inbox confirmation.
 
 ---
 
+## Phone number extraction
+
+`--include-phone` fills the "Contact Number For Job Post" column where
+possible, for both hiring-manager and reach-out contacts. **No AI/LLM is
+involved anywhere in this** — it's plain regular-expression pattern
+matching against real text pulled from Gmail.
+
+**How it works:**
+- For each contact's email address, it searches your **Inbox** (not Sent
+  mail) for `from:<email>` — since a recruiter's phone number can only
+  appear in something *they* actually sent you, not in your own outgoing
+  messages.
+- It reads the plain text of up to 3 of their most recent messages to you,
+  and runs two regex patterns against it: one for common US phone formats
+  (`(415) 555-0132`, `415-555-0132`, `415.555.0132`, `+1 415 555 0132`,
+  `+14155550132`), and one for an extension marker right after it (`ext`,
+  `ext.`, `extension`, or `x`, e.g. `x204`).
+- A bare 10-digit run with **no** separators at all (no `()`, `-`, `.`,
+  space, or leading `+`) is deliberately rejected — those are more often
+  tracking/order numbers than phone numbers in a signature block.
+- The first valid match found is used, formatted as e.g.
+  `"(415) 555-0132 x204"` in a single cell (no separate extension column).
+
+**Backfill behavior:** unlike the rest of the pipeline, this doesn't only
+apply to new rows — it also scans every *existing* row with a matched
+recruiter email but a blank Contact Number, and fills it in if a phone can
+be found. This only ever writes into cells that are currently blank; a
+number you've typed in by hand is never touched or overwritten. Note this
+backfill is **not** limited by `--since` — it always covers your entire
+sheet (see the warning under "Understanding the flags" above).
+
+**Known limitations:**
+- **Most recruiters never reply**, so most lookups will find nothing —
+  that's expected, not a bug. The run summary reports how many unique
+  contacts were checked vs. how many phone numbers were actually found.
+- **Signatures that are images are not read at all.** If a phone number
+  only exists as pixels in an embedded signature graphic (common with some
+  signature-generator tools), there's no text for the regex to match — this
+  would require OCR, which isn't implemented.
+- Only checks the sender's own replies — it does not look inside quoted
+  text in your own Sent mail, even if a reply thread happens to include it.
+- Adds one extra Gmail search (plus up to 3 message fetches) per unique
+  contact email. The first run with `--include-phone` on a large tracker
+  can take several minutes; later runs are much faster since most cells
+  will already be filled in.
+
+---
+
 ## What each spreadsheet column means
 
 | Column | Filled automatically? | Notes |
@@ -412,7 +508,7 @@ source instead of an inbox confirmation.
 | Website Applied | LinkedIn only | Shortened link straight to the job posting. Always blank for Dice and reach-out rows (no job-specific link available) |
 | Hiring Manager In Linkedin | Sometimes | Application rows: only if a matching Sent email was found on the same date. If you emailed multiple people at that company that day (To **or** Cc), all of them are listed here, separated by `; `. Reach-out rows: always filled — the contact's name |
 | Company Email | Sometimes | Application rows: same matches as above, `; `-separated. Reach-out rows: always filled — the contact's email |
-| Contact Number For Job Post | No | Left blank for you to fill in |
+| Contact Number For Job Post | Sometimes (opt-in) | Blank unless you run with `--include-phone` — see [Phone number extraction](#phone-number-extraction). Otherwise left blank for you to fill in |
 | Comment Section | No | Left blank for you to fill in |
 
 Every run **preserves anything you've typed in by hand** — manual notes,
@@ -465,13 +561,14 @@ occasionally and review with `--dry-run` first.
 ```
 Linkedin_Tracker/
 ├── tracker_venv/            # virtual environment (not committed to Git)
-├── linkedin_tracker/        # the actual code: Gmail login, email parsing, matching
+├── src/                     # the actual code: Gmail login, email parsing, matching
 │   ├── gmail_client.py
 │   ├── parser.py            # LinkedIn email parsing
 │   ├── dice_parser.py       # Dice email parsing
-│   └── sent_matcher.py
+│   ├── sent_matcher.py      # hiring-manager & reach-out contact matching
+│   └── phone_lookup.py      # recruiter phone number extraction
 ├── data/
-│   ├── LinkedIn_Job_Tracker.xlsx              # the tracker you open/edit
+│   ├── Job_Tracker.xlsx              # the tracker you open/edit
 │   └── LinkedIn_Job_Tracker_full_history_backup.xlsx
 ├── secrets/
 │   ├── credentials.json     # your OAuth client (not committed to Git)
