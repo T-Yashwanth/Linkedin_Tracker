@@ -15,7 +15,7 @@ from src.phone_lookup import (
 from update_tracker import fetch_all_messages
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROCESSED_FILE = os.path.join(BASE_DIR, 'directory_processed_ids.json')
+PROCESSED_FILE = os.path.join(BASE_DIR, 'data', 'directory_processed_ids.json')
 DEFAULT_DIRECTORY = os.path.join(BASE_DIR, 'data', 'Recruiters.xlsx')
 
 METADATA_HEADERS = ['To', 'Cc', 'From', 'Subject', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted']
@@ -29,6 +29,7 @@ def load_processed():
 
 
 def save_processed(ids):
+    os.makedirs(os.path.dirname(PROCESSED_FILE), exist_ok=True)
     with open(PROCESSED_FILE, 'w') as f:
         json.dump(sorted(ids), f, indent=2)
 

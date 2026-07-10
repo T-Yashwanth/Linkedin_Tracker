@@ -515,8 +515,8 @@ A **separate script and a separate file** (`data/Recruiters.xlsx`) from
 the main tracker — a standalone address book of every recruiter/contact
 you've exchanged email with, grouped by company domain. It does not read
 `Job_Tracker.xlsx` at all; it scans Gmail directly and keeps its own state
-file, `directory_processed_ids.json`, exactly like `processed_ids.json`
-does for the main tracker.
+file, `data/directory_processed_ids.json`, exactly like
+`data/processed_ids.json` does for the main tracker.
 
 ```bash
 # Command Prompt
@@ -687,14 +687,14 @@ Linkedin_Tracker/
 ├── data/
 │   ├── Job_Tracker.xlsx              # the tracker you open/edit
 │   ├── Recruiters.xlsx                # the recruiter directory you open/edit
+│   ├── processed_ids.json            # main tracker's memory of which emails it already imported
+│   ├── directory_processed_ids.json  # directory's own memory (separate from the above)
 │   └── LinkedIn_Job_Tracker_full_history_backup.xlsx
 ├── secrets/
 │   ├── credentials.json     # your OAuth client (not committed to Git)
 │   └── token.json           # created after first login (not committed to Git)
 ├── update_tracker.py        # main tracker script you run
 ├── update_directory.py      # recruiter directory script you run
-├── processed_ids.json       # main tracker's memory of which emails it already imported
-├── directory_processed_ids.json  # directory's own memory (separate from the above)
 └── requirements.txt         # list of Python packages this project needs
 ```
 

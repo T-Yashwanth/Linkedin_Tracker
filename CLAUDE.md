@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A CLI tool that reads the user's Gmail via the Gmail API (read-only scope), finds LinkedIn and Dice job-application confirmation emails, and writes them into an Excel tracker (`data/Job_Tracker.xlsx`). It also cross-references the user's Sent folder to guess hiring-manager contacts for each application, can separately log "reach-out" contacts (people emailed on a company domain with no matching application), and can look up recruiter phone numbers from their Inbox replies via regex (no LLM/AI involved).
 
-There is a **second, independent entry point** — `update_directory.py` — which builds a recruiter/contact address book (`data/Recruiters.xlsx`) by scanning Sent (To/Cc) and Inbox (From) mail directly. It does not read `Job_Tracker.xlsx` at all and keeps its own state file (`directory_processed_ids.json`). See "The recruiter directory" section below before touching it.
+There is a **second, independent entry point** — `update_directory.py` — which builds a recruiter/contact address book (`data/Recruiters.xlsx`) by scanning Sent (To/Cc) and Inbox (From) mail directly. It does not read `Job_Tracker.xlsx` at all and keeps its own state file (`data/directory_processed_ids.json`). See "The recruiter directory" section below before touching it.
 
 ## Running it
 
@@ -51,7 +51,7 @@ Single entry point: `update_tracker.py`. Everything else lives in `src/` as focu
 
 Two persistent files gate behavior across runs:
 
-1. **`processed_ids.json`** (gitignored) — the set of Gmail message IDs already imported. This, not the spreadsheet, is the source of truth for "already handled." Deleting the xlsx without also passing `--rebuild` produces an empty sheet, because every source email is still marked processed and gets skipped. `--rebuild` clears this set for the run and rewrites it at the end to match whatever's in the sheet.
+1. **`data/processed_ids.json`** (gitignored) — the set of Gmail message IDs already imported. This, not the spreadsheet, is the source of truth for "already handled." Deleting the xlsx without also passing `--rebuild` produces an empty sheet, because every source email is still marked processed and gets skipped. `--rebuild` clears this set for the run and rewrites it at the end to match whatever's in the sheet.
 2. **`data/Job_Tracker.xlsx`** — columns are fixed (see `HEADERS` in `update_tracker.py`). Every run reads existing rows (`read_existing_rows`), merges in new rows, sorts the combined set by date, and rewrites rows 2..N in place — manual edits (comments, contact numbers, hand-added rows) are always preserved except under `--rebuild`. `LEGACY_PLATFORM_VALUES` silently migrates old `'Yes'` platform values (from when LinkedIn was the only source) to `'LinkedIn'` on every read.
 
 `--dry-run` mirrors the same read/merge logic (including reading existing rows for non-rebuild runs, so previews accurately reflect what a real run would add) but never opens the workbook for writing and never touches `processed_ids.json`.
@@ -68,7 +68,7 @@ Follow the `SOURCES` list pattern in `update_tracker.py`: a Gmail search query, 
 
 ## The recruiter directory (`update_directory.py`)
 
-Separate script, separate file, separate state (`directory_processed_ids.json`) — does not read `Job_Tracker.xlsx`. Scans Sent (To/Cc) and Inbox (From) mail for real human contacts on company domains, filtering out personal-mail providers, job-board/ATS domains, and automated senders (both by header signal — `List-Unsubscribe`, bulk `Precedence`, `Auto-Submitted` — and by local-part pattern, see `BOT_LOCAL_PART_RE` in `src/recruiter_directory.py`). The user's own email address (fetched via `getProfile`) is explicitly excluded from every scan, so CC'ing themselves never adds them as their own contact.
+Separate script, separate file, separate state (`data/directory_processed_ids.json`) — does not read `Job_Tracker.xlsx`. Scans Sent (To/Cc) and Inbox (From) mail for real human contacts on company domains, filtering out personal-mail providers, job-board/ATS domains, and automated senders (both by header signal — `List-Unsubscribe`, bulk `Precedence`, `Auto-Submitted` — and by local-part pattern, see `BOT_LOCAL_PART_RE` in `src/recruiter_directory.py`). The user's own email address (fetched via `getProfile`) is explicitly excluded from every scan, so CC'ing themselves never adds them as their own contact.
 
 Unlike the main tracker, this is **merge-only, never rebuilt on a normal run** — `merge_contact()` fills blank cells and unions the Positions column (subject lines, `Re:`/`Fwd:`-stripped) but never overwrites a non-blank value. Manually added rows (even ones missing an email) are always preserved. Only `--rebuild` wipes the file.
 
