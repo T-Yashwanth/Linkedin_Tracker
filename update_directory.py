@@ -40,9 +40,12 @@ def fetch_headers(service, msg_id):
     return {h['name']: h['value'] for h in msg['payload'].get('headers', [])}
 
 
-def discover_contacts(service, since_date, max_results, processed):
+def discover_contacts(service, since_date, max_results, processed, own_email):
     """Scan Sent (To/Cc) and Inbox (From) mail for eligible human contacts,
-    marking every scanned message ID as processed regardless of outcome."""
+    marking every scanned message ID as processed regardless of outcome.
+    own_email (lowercased) is never added -- guards against the user
+    showing up as their own contact (e.g. CC'd on their own outgoing mail
+    from a non-generic-domain address)."""
     book = ContactBook()
 
     sent_query = 'in:sent'
@@ -59,9 +62,11 @@ def discover_contacts(service, since_date, max_results, processed):
         headers = fetch_headers(service, msg_id)
         subject = headers.get('Subject', '')
         for name, email in parse_recipients(headers.get('To', '')):
-            book.add(email, name=name, subject=subject)
+            if email != own_email:
+                book.add(email, name=name, subject=subject)
         for name, email in parse_recipients(headers.get('Cc', '')):
-            book.add(email, name=name, subject=subject)
+            if email != own_email:
+                book.add(email, name=name, subject=subject)
         processed.add(msg_id)
 
     for m in fetch_all_messages(service, inbox_query, max_results):
@@ -74,7 +79,8 @@ def discover_contacts(service, since_date, max_results, processed):
             continue
         subject = headers.get('Subject', '')
         for name, email in parse_recipients(headers.get('From', '')):
-            book.add(email, name=name, subject=subject)
+            if email != own_email:
+                book.add(email, name=name, subject=subject)
 
     return book
 
@@ -92,9 +98,10 @@ def main():
 
     service = get_gmail_service()
     processed = set() if args.rebuild else load_processed()
+    own_email = service.users().getProfile(userId='me').execute().get('emailAddress', '').lower()
 
     print('Scanning Sent and Inbox mail for recruiter/contact emails...')
-    book = discover_contacts(service, since_date, args.max_results, processed)
+    book = discover_contacts(service, since_date, args.max_results, processed, own_email)
     contacts = dict(book.items())
     print(f'Found {len(contacts)} eligible contact(s) after filtering out generic/job-board/automated senders.')
 

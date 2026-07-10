@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A CLI tool that reads the user's Gmail via the Gmail API (read-only scope), finds LinkedIn and Dice job-application confirmation emails, and writes them into an Excel tracker (`data/Job_Tracker.xlsx`). It also cross-references the user's Sent folder to guess hiring-manager contacts for each application, can separately log "reach-out" contacts (people emailed on a company domain with no matching application), and can look up recruiter phone numbers from their Inbox replies via regex (no LLM/AI involved).
 
+There is a **second, independent entry point** — `update_directory.py` — which builds a recruiter/contact address book (`data/Recruiters.xlsx`) by scanning Sent (To/Cc) and Inbox (From) mail directly. It does not read `Job_Tracker.xlsx` at all and keeps its own state file (`directory_processed_ids.json`). See "The recruiter directory" section below before touching it.
+
 ## Running it
 
 ```bash
@@ -63,3 +65,15 @@ This means: **never drop `--since` "just to widen" a phone backfill** — the ba
 ### Adding a new source
 
 Follow the `SOURCES` list pattern in `update_tracker.py`: a Gmail search query, a `parse_*` function returning `{company, title, applied_date, job_link}`, and a `source_value` for the Platform column. The rest of the pipeline (dedup via `processed_ids.json`, hiring-manager matching, merge/sort/write) is source-agnostic.
+
+## The recruiter directory (`update_directory.py`)
+
+Separate script, separate file, separate state (`directory_processed_ids.json`) — does not read `Job_Tracker.xlsx`. Scans Sent (To/Cc) and Inbox (From) mail for real human contacts on company domains, filtering out personal-mail providers, job-board/ATS domains, and automated senders (both by header signal — `List-Unsubscribe`, bulk `Precedence`, `Auto-Submitted` — and by local-part pattern, see `BOT_LOCAL_PART_RE` in `src/recruiter_directory.py`). The user's own email address (fetched via `getProfile`) is explicitly excluded from every scan, so CC'ing themselves never adds them as their own contact.
+
+Unlike the main tracker, this is **merge-only, never rebuilt on a normal run** — `merge_contact()` fills blank cells and unions the Positions column (subject lines, `Re:`/`Fwd:`-stripped) but never overwrites a non-blank value. Manually added rows (even ones missing an email) are always preserved. Only `--rebuild` wipes the file.
+
+Job Title, Phone, and LinkedIn Profile URL come from `scan_contact_signature()` in `src/phone_lookup.py` — one Inbox fetch per contact extracts all three (quoted reply text stripped first via `strip_quoted_text`). None of the three is a *verified* match to the contact specifically — each is just the first regex match found in their own text, so a shared mailbox or a message that mentions someone else's number/profile can attribute the wrong one.
+
+### ⚠️ Gotcha: default `--max-results` (2000) is too low for a full-history run
+
+Confirmed empirically in this project's history: a real account had 2,148 Sent + 3,626 Inbox messages — both exceed the default. Passing `--max-results` too low **silently truncates** the scan (no error, just fewer messages processed) rather than failing loudly. Before a first full-history `update_directory.py` run (no `--since`), check actual mailbox size and pass an explicit `--max-results` well above it (e.g. `fetch_all_messages(service, 'in:sent', 10000)` / `'in:inbox'` to get a real count first).

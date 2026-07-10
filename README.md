@@ -566,7 +566,8 @@ Mirrors the main tracker's style: `--since YYYY-MM-DD` (narrows both the
 Sent and Inbox scan), `--dry-run` (discovers and prints contacts grouped
 by domain — **no signature scans, no file writes**, so it's fast),
 `--rebuild` (wipes `directory_processed_ids.json` and the xlsx, starts
-fresh), `--max-results N`, `--directory <path>`.
+fresh), `--max-results N` (default 2000 — see the warning below before a
+full-history run), `--directory <path>`.
 
 ```bash
 # Safe first look — no writes, no slow signature scans
@@ -577,8 +578,17 @@ tracker_venv/Scripts/python update_directory.py --since 2026-06-29
 
 # Full history (first run establishes the whole directory; can take a
 # while since almost every contact needs a signature scan the first time)
-tracker_venv/Scripts/python update_directory.py
+# -- bump --max-results well above your actual mailbox size (see below)
+tracker_venv/Scripts/python update_directory.py --max-results 6000
 ```
+
+> ⚠️ **The default `--max-results` (2000) is often too low for a
+> full-history run and truncates silently — no error, just fewer
+> messages scanned than actually exist.** A real account in this
+> project's testing had 2,148 Sent + 3,626 Inbox messages, both over the
+> default. Before your first no-`--since` run, it's worth checking your
+> actual counts and passing an explicit `--max-results` comfortably above
+> them (a few thousand is a safe starting point for most mailboxes).
 
 ### Known limitations
 
