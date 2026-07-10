@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 secrets/
 processed_ids.json
+directory_processed_ids.json
 data/*.xlsx
 ~$*.xlsx
 .claude

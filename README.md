@@ -502,6 +502,95 @@ sheet (see the warning under "Understanding the flags" above).
 
 ---
 
+## Recruiter directory (`update_directory.py`)
+
+A **separate script and a separate file** (`data/Recruiters.xlsx`) from
+the main tracker — a standalone address book of every recruiter/contact
+you've exchanged email with, grouped by company domain. It does not read
+`Job_Tracker.xlsx` at all; it scans Gmail directly and keeps its own state
+file, `directory_processed_ids.json`, exactly like `processed_ids.json`
+does for the main tracker.
+
+```bash
+# Command Prompt
+tracker_venv\Scripts\python update_directory.py --since 2026-06-29 --dry-run
+
+# Git Bash
+tracker_venv/Scripts/python update_directory.py --since 2026-06-29 --dry-run
+```
+
+### What it does
+
+- Scans your **Sent** mail (To/Cc recipients) and your **Inbox** (senders)
+  for both directions of contact — someone you emailed, or someone who
+  emailed you (including interview/meeting invitations).
+- Filters out anything that isn't a real, domain-specific human contact:
+  personal mail providers (Gmail, Yahoo, etc.), job-board/ATS domains
+  (Dice, Indeed, LinkedIn, Greenhouse, Workday, etc.), and automated
+  senders — detected both by header (`List-Unsubscribe`, bulk
+  `Precedence`, `Auto-Submitted`) and by local-part patterns
+  (`no-reply`, `notifications`, `newsletter`, and similar).
+- Columns: `S.no | Domain | Company Name | Job Title | Recruiter Name |
+  Phone | Email | LinkedIn Profile | Positions`. Rows are sorted by
+  (domain, email) so every contact at the same company sits together.
+  **Email is mandatory and unique** — one row per address, never
+  duplicated.
+- **Positions** are the subject lines of every email exchanged with that
+  contact (in either direction), cleaned of repeated `Re:`/`Fwd:`
+  prefixes and `;`-joined.
+- Job Title, Phone, and LinkedIn Profile are filled in the same way as
+  `--include-phone`: a best-effort regex scan of the contact's own Inbox
+  replies (quoted text stripped, your own phone number/LinkedIn profile
+  excluded automatically).
+
+### Unlike the main tracker — this one preserves your edits
+
+This is the opposite of `--rebuild`-style behavior: **the directory is
+never regenerated from scratch on a normal run.** Existing rows are only
+ever merged into — a blank cell gets filled in if new data is found, but
+anything you've already typed in (or a value the script already filled)
+is never overwritten. Positions accumulate (union, not replace) rather
+than being reset. Manually added rows, even ones with no email at all,
+are always kept. Only `--rebuild` wipes the file and starts over.
+
+### Flags
+
+Mirrors the main tracker's style: `--since YYYY-MM-DD` (narrows both the
+Sent and Inbox scan), `--dry-run` (discovers and prints contacts grouped
+by domain — **no signature scans, no file writes**, so it's fast),
+`--rebuild` (wipes `directory_processed_ids.json` and the xlsx, starts
+fresh), `--max-results N`, `--directory <path>`.
+
+```bash
+# Safe first look — no writes, no slow signature scans
+tracker_venv/Scripts/python update_directory.py --since 2026-06-29 --dry-run
+
+# Build/update it for real, scoped to a recent window
+tracker_venv/Scripts/python update_directory.py --since 2026-06-29
+
+# Full history (first run establishes the whole directory; can take a
+# while since almost every contact needs a signature scan the first time)
+tracker_venv/Scripts/python update_directory.py
+```
+
+### Known limitations
+
+- Same phone/LinkedIn/title extraction caveats as `--include-phone`
+  above: most contacts never replied (so most cells stay blank), image
+  signatures aren't read, and best-effort regex matching can occasionally
+  pick up the wrong thing — e.g. a LinkedIn link the sender shared for
+  someone *else* (like a candidate's profile) can get attributed to them
+  instead. Treat these three columns as a helpful starting point, not
+  ground truth.
+- Automated-sender filtering is heuristic; if something automated slips
+  through, or a real contact is wrongly excluded, it's a filter to refine
+  in `src/directory.py` (`is_eligible_contact`, `BOT_LOCAL_PART_RE`), not
+  something to fix by hand-editing rows.
+- Close `Recruiters.xlsx` in Excel before running — same file-lock
+  behavior as the main tracker.
+
+---
+
 ## What each spreadsheet column means
 
 | Column | Filled automatically? | Notes |
@@ -572,15 +661,19 @@ Linkedin_Tracker/
 │   ├── parser.py            # LinkedIn email parsing
 │   ├── dice_parser.py       # Dice email parsing
 │   ├── sent_matcher.py      # hiring-manager & reach-out contact matching
-│   └── phone_lookup.py      # recruiter phone number extraction
+│   ├── phone_lookup.py      # recruiter phone/title/LinkedIn signature scan
+│   └── directory.py         # recruiter directory aggregation + sheet I/O
 ├── data/
 │   ├── Job_Tracker.xlsx              # the tracker you open/edit
+│   ├── Recruiters.xlsx                # the recruiter directory you open/edit
 │   └── LinkedIn_Job_Tracker_full_history_backup.xlsx
 ├── secrets/
 │   ├── credentials.json     # your OAuth client (not committed to Git)
 │   └── token.json           # created after first login (not committed to Git)
-├── update_tracker.py        # the script you actually run
-├── processed_ids.json       # the script's memory of which emails it already imported
+├── update_tracker.py        # main tracker script you run
+├── update_directory.py      # recruiter directory script you run
+├── processed_ids.json       # main tracker's memory of which emails it already imported
+├── directory_processed_ids.json  # directory's own memory (separate from the above)
 └── requirements.txt         # list of Python packages this project needs
 ```
 
