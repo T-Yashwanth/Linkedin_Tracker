@@ -468,6 +468,14 @@ matching against real text pulled from Gmail.
 - A bare 10-digit run with **no** separators at all (no `()`, `-`, `.`,
   space, or leading `+`) is deliberately rejected — those are more often
   tracking/order numbers than phone numbers in a signature block.
+- **Quoted reply history is stripped first, and your own number is never
+  recorded.** Recruiter replies usually quote your original email — with
+  your signature and your phone number — underneath their message. The
+  extractor cuts the body at the first quoted-message marker ("On ...
+  wrote:", "-----Original Message-----", `>`-prefixed lines, etc.), and it
+  also auto-detects your own number(s) from your Sent-mail signature and
+  excludes them from every match, so a reply that contains no recruiter
+  phone yields a blank instead of *your* number.
 - The first valid match found is used, formatted as e.g.
   `"(415) 555-0132 x204"` in a single cell (no separate extension column).
 
@@ -487,8 +495,6 @@ sheet (see the warning under "Understanding the flags" above).
   only exists as pixels in an embedded signature graphic (common with some
   signature-generator tools), there's no text for the regex to match — this
   would require OCR, which isn't implemented.
-- Only checks the sender's own replies — it does not look inside quoted
-  text in your own Sent mail, even if a reply thread happens to include it.
 - Adds one extra Gmail search (plus up to 3 message fetches) per unique
   contact email. The first run with `--include-phone` on a large tracker
   can take several minutes; later runs are much faster since most cells

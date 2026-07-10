@@ -11,7 +11,7 @@ from src.gmail_client import get_gmail_service
 from src.parser import get_html_body, parse_application_email
 from src.dice_parser import parse_dice_subject
 from src.sent_matcher import fetch_sent_index, find_hiring_managers, find_reachout_contacts
-from src.phone_lookup import find_phone_for_email
+from src.phone_lookup import find_phone_for_email, get_own_phone_numbers
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROCESSED_FILE = os.path.join(BASE_DIR, 'processed_ids.json')
@@ -204,14 +204,19 @@ def main():
             known_emails.update(e.strip() for e in str(emails_cell).split(';') if e.strip())
 
     phone_cache = {}
+    own_numbers = set()
 
     def lookup_phone(email):
         key = email.lower().strip()
         if key not in phone_cache:
-            phone_cache[key] = find_phone_for_email(service, fetch_all_messages, key)
+            phone_cache[key] = find_phone_for_email(
+                service, fetch_all_messages, key, exclude_digits=own_numbers)
         return phone_cache[key]
 
     if args.include_phone:
+        own_numbers = get_own_phone_numbers(service, fetch_all_messages)
+        if own_numbers:
+            print(f'Detected {len(own_numbers)} of your own phone number(s) from your Sent-mail signature; they will never be recorded as a recruiter number.')
         print('Looking up recruiter phone numbers from Inbox replies (this can take a while)...')
         for row in existing_rows:
             values = row['values']
