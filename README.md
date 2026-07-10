@@ -476,8 +476,15 @@ matching against real text pulled from Gmail.
   also auto-detects your own number(s) from your Sent-mail signature and
   excludes them from every match, so a reply that contains no recruiter
   phone yields a blank instead of *your* number.
-- The first valid match found is used, formatted as e.g.
-  `"(415) 555-0132 x204"` in a single cell (no separate extension column).
+- **The first valid match found is used — this is not a verified "this
+  number belongs to them" check.** The only thing confirmed is that the
+  *email* came from that contact's address; the number itself is just
+  whichever one appears first in their own (quote-stripped) text. If their
+  message mentions more than one number — e.g. "call our front desk at X,
+  or reach me directly at Y" — whichever comes first in the text wins,
+  not necessarily their personal line.
+- The match is formatted as e.g. `"(415) 555-0132 x204"` in a single cell
+  (no separate extension column).
 
 **Backfill behavior:** unlike the rest of the pipeline, this doesn't only
 apply to new rows — it also scans every *existing* row with a matched
@@ -577,11 +584,15 @@ tracker_venv/Scripts/python update_directory.py
 
 - Same phone/LinkedIn/title extraction caveats as `--include-phone`
   above: most contacts never replied (so most cells stay blank), image
-  signatures aren't read, and best-effort regex matching can occasionally
-  pick up the wrong thing — e.g. a LinkedIn link the sender shared for
-  someone *else* (like a candidate's profile) can get attributed to them
-  instead. Treat these three columns as a helpful starting point, not
-  ground truth.
+  signatures aren't read, and none of the three fields are a *verified*
+  match — only "this email came from their address" is confirmed. The
+  Phone and LinkedIn columns are each just the first match found in that
+  contact's own text, not something checked against the contact
+  specifically: a LinkedIn link the sender shared for someone *else*
+  (like a candidate's profile) can end up attributed to them, and if
+  their message mentions more than one phone number (e.g. a front-desk
+  line and a direct line), whichever appears first wins. Treat these
+  three columns as a helpful starting point, not ground truth.
 - Automated-sender filtering is heuristic; if something automated slips
   through, or a real contact is wrongly excluded, it's a filter to refine
   in `src/directory.py` (`is_eligible_contact`, `BOT_LOCAL_PART_RE`), not
