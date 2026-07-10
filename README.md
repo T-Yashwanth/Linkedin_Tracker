@@ -595,7 +595,7 @@ tracker_venv/Scripts/python update_directory.py
   three columns as a helpful starting point, not ground truth.
 - Automated-sender filtering is heuristic; if something automated slips
   through, or a real contact is wrongly excluded, it's a filter to refine
-  in `src/directory.py` (`is_eligible_contact`, `BOT_LOCAL_PART_RE`), not
+  in `src/recruiter_directory.py` (`is_eligible_contact`, `BOT_LOCAL_PART_RE`), not
   something to fix by hand-editing rows.
 - Close `Recruiters.xlsx` in Excel before running — same file-lock
   behavior as the main tracker.
@@ -673,7 +673,7 @@ Linkedin_Tracker/
 │   ├── dice_parser.py       # Dice email parsing
 │   ├── sent_matcher.py      # hiring-manager & reach-out contact matching
 │   ├── phone_lookup.py      # recruiter phone/title/LinkedIn signature scan
-│   └── directory.py         # recruiter directory aggregation + sheet I/O
+│   └── recruiter_directory.py  # recruiter directory aggregation + sheet I/O
 ├── data/
 │   ├── Job_Tracker.xlsx              # the tracker you open/edit
 │   ├── Recruiters.xlsx                # the recruiter directory you open/edit

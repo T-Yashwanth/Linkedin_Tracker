@@ -5,7 +5,7 @@ import os
 from dateutil import parser as dateparser
 
 from src.gmail_client import get_gmail_service
-from src.directory import (
+from src.recruiter_directory import (
     ContactBook, is_bot_headers, parse_recipients, ensure_directory,
     read_directory_rows, merge_contact, write_directory,
 )
