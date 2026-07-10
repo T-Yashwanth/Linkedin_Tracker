@@ -136,11 +136,11 @@ def main():
 
     for email, c in contacts.items():
         existing = existing_by_email.get(email)
-        needs_scan = existing is None or not all([existing[2], existing[4], existing[6]])
+        needs_scan = existing is None or not all([existing[1], existing[3], existing[5]])
         sig = lookup_signature(email) if needs_scan else {'phone': None, 'title': None, 'linkedin': None}
 
         merged = merge_contact(
-            existing, c['domain'], c['company'], sig['title'], c['name'],
+            existing, c['company'], sig['title'], c['name'],
             sig['phone'], email, sig['linkedin'], c['subjects'],
         )
         if existing is None:

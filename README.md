@@ -530,11 +530,11 @@ tracker_venv/Scripts/python update_directory.py --since 2026-06-29 --dry-run
   senders — detected both by header (`List-Unsubscribe`, bulk
   `Precedence`, `Auto-Submitted`) and by local-part patterns
   (`no-reply`, `notifications`, `newsletter`, and similar).
-- Columns: `S.no | Domain | Company Name | Job Title | Recruiter Name |
-  Phone | Email | LinkedIn Profile | Positions`. Rows are sorted by
-  (domain, email) so every contact at the same company sits together.
-  **Email is mandatory and unique** — one row per address, never
-  duplicated.
+- Columns: `S.no | Company Name | Job Title | Recruiter Name | Phone |
+  Email | LinkedIn Profile | Positions`. Rows are sorted by the domain of
+  each email address (derived from Email, not a separate column) so every
+  contact at the same company sits together. **Email is mandatory and
+  unique** — one row per address, never duplicated.
 - **Positions** are the subject lines of every email exchanged with that
   contact (in either direction), cleaned of repeated `Re:`/`Fwd:`
   prefixes and `;`-joined.

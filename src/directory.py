@@ -8,11 +8,11 @@ from openpyxl.styles import Font
 from src.sent_matcher import GENERIC_DOMAINS, guess_company_from_domain, name_from_email_local
 
 DIRECTORY_HEADERS = [
-    'S.no', 'Domain', 'Company Name', 'Job Title', 'Recruiter Name',
+    'S.no', 'Company Name', 'Job Title', 'Recruiter Name',
     'Phone', 'Email', 'LinkedIn Profile', 'Positions',
 ]
 DIRECTORY_COLUMN_WIDTHS = {
-    'B': 22, 'C': 20, 'D': 26, 'E': 20, 'F': 16, 'G': 30, 'H': 34, 'I': 45,
+    'B': 20, 'C': 26, 'D': 20, 'E': 16, 'F': 30, 'G': 34, 'H': 45,
 }
 
 JOB_BOARD_DOMAINS = {
@@ -142,22 +142,24 @@ def ensure_directory(path, rebuild):
 
 
 def _last_data_row(ws):
+    last_col = len(DIRECTORY_HEADERS) + 1
     for r in range(ws.max_row, 1, -1):
-        if any(ws.cell(row=r, column=c).value not in (None, '') for c in range(2, 10)):
+        if any(ws.cell(row=r, column=c).value not in (None, '') for c in range(2, last_col)):
             return r
     return 1
 
 
 def read_directory_rows(ws):
-    """Read existing directory rows (columns B-I) into {email: values} for
+    """Read existing directory rows (columns B-H) into {email: values} for
     rows that have an email, plus a separate list of rows with no email
     (kept as-is, e.g. manually added entries missing that field)."""
+    last_col = len(DIRECTORY_HEADERS) + 1
     by_email = {}
     no_email_rows = []
     last_row = _last_data_row(ws)
     for r in range(2, last_row + 1):
-        values = [ws.cell(row=r, column=c).value for c in range(2, 10)]
-        email = (values[5] or '').strip().lower()  # column G, index 5 within B-I
+        values = [ws.cell(row=r, column=c).value for c in range(2, last_col)]
+        email = (values[4] or '').strip().lower()  # column F, index 4 within B-H
         if email:
             by_email[email] = values
         else:
@@ -165,41 +167,42 @@ def read_directory_rows(ws):
     return by_email, no_email_rows
 
 
-def merge_contact(existing_values, domain, company, title, name, phone, email,
+def merge_contact(existing_values, company, title, name, phone, email,
                    linkedin, subjects):
     """Return updated column values for one contact: blanks get filled,
     non-blank existing values are preserved, Positions is a union-append.
     existing_values may be None for a brand-new contact."""
     if existing_values is None:
-        existing_values = [None] * 8
+        existing_values = [None] * 7
 
     values = list(existing_values)
-    fill = {0: domain, 1: company, 2: title, 3: name, 4: phone, 5: email, 6: linkedin}
+    fill = {0: company, 1: title, 2: name, 3: phone, 4: email, 5: linkedin}
     for idx, new_val in fill.items():
         if not values[idx] and new_val:
             values[idx] = new_val
 
-    existing_positions = [p.strip() for p in (values[7] or '').split(';') if p.strip()]
+    existing_positions = [p.strip() for p in (values[6] or '').split(';') if p.strip()]
     seen = set(p.lower() for p in existing_positions)
     for pos in sorted(subjects or []):
         if pos.lower() not in seen:
             existing_positions.append(pos)
             seen.add(pos.lower())
-    values[7] = '; '.join(existing_positions) if existing_positions else None
+    values[6] = '; '.join(existing_positions) if existing_positions else None
 
     return values
 
 
 def write_directory(path, by_email, no_email_rows):
-    """Rewrite the directory: rows with an email sorted by (domain, email),
-    then any manually-added rows lacking an email, preserved as-is."""
+    """Rewrite the directory: rows with an email sorted by (domain, email)
+    -- domain derived from the email address itself -- then any
+    manually-added rows lacking an email, preserved as-is."""
     wb = ensure_directory(path, rebuild=False)
     ws = wb.active
     last_row = _last_data_row(ws)
     if last_row >= 2:
         ws.delete_rows(2, last_row - 1)
 
-    ordered = sorted(by_email.items(), key=lambda kv: (kv[1][0] or '', kv[0]))
+    ordered = sorted(by_email.items(), key=lambda kv: (kv[0].split('@')[-1], kv[0]))
 
     row_idx = 2
     sno = 1
