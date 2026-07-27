@@ -2,6 +2,8 @@ import re
 from datetime import datetime
 from email.utils import parseaddr
 
+from googleapiclient.errors import HttpError
+
 STOPWORDS = {
     'inc', 'llc', 'ltd', 'corp', 'corporation', 'group', 'consulting',
     'solutions', 'solution', 'staffing', 'systems', 'system', 'technologies',
@@ -51,10 +53,19 @@ def fetch_sent_index(service, fetch_all_messages_fn, since_query_date, max_resul
     messages = fetch_all_messages_fn(service, query, max_results)
 
     index = []
+    skipped = 0
     for m in messages:
-        msg = service.users().messages().get(
-            userId='me', id=m['id'], format='metadata', metadataHeaders=['To', 'Cc', 'Date']
-        ).execute()
+        try:
+            msg = service.users().messages().get(
+                userId='me', id=m['id'], format='metadata', metadataHeaders=['To', 'Cc', 'Date'],
+            ).execute(num_retries=3)
+        except HttpError:
+            # A small number of messages can fail to fetch (e.g. Gmail's
+            # occasional "Precondition check failed" 400 on a specific
+            # message). Skip that one message rather than aborting the
+            # whole index -- losing one message's To/Cc data is harmless.
+            skipped += 1
+            continue
         headers = {h['name']: h['value'] for h in msg['payload'].get('headers', [])}
         recipients_header = ', '.join(filter(None, [headers.get('To', ''), headers.get('Cc', '')]))
         if not recipients_header:
@@ -84,6 +95,9 @@ def fetch_sent_index(service, fetch_all_messages_fn, since_query_date, max_resul
                 'email': addr,
                 'domain': domain,
             })
+
+    if skipped:
+        print(f'Skipped {skipped} sent message(s) that could not be fetched.')
 
     return index
 

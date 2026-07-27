@@ -14,7 +14,7 @@ from src.sent_matcher import fetch_sent_index, find_hiring_managers, find_reacho
 from src.phone_lookup import find_phone_for_email, get_own_phone_numbers
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROCESSED_FILE = os.path.join(BASE_DIR, 'processed_ids.json')
+PROCESSED_FILE = os.path.join(BASE_DIR, 'data', 'processed_ids.json')
 DEFAULT_TRACKER = os.path.join(BASE_DIR, 'data', 'Job_Tracker.xlsx')
 
 
@@ -78,6 +78,7 @@ def load_processed():
 
 
 def save_processed(ids):
+    os.makedirs(os.path.dirname(PROCESSED_FILE), exist_ok=True)
     with open(PROCESSED_FILE, 'w') as f:
         json.dump(sorted(ids), f, indent=2)
 
