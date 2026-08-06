@@ -5,5 +5,6 @@ secrets/
 processed_ids.json
 directory_processed_ids.json
 data/*.xlsx
+**/data/*.xlsx
 ~$*.xlsx
 .claude
