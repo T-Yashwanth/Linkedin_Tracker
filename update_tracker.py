@@ -6,6 +6,7 @@ from datetime import datetime
 import openpyxl
 from openpyxl.styles import Font
 from dateutil import parser as dateparser
+from googleapiclient.errors import HttpError
 
 from src.gmail_client import get_gmail_service
 from src.parser import get_html_body, parse_application_email
@@ -14,7 +15,6 @@ from src.sent_matcher import fetch_sent_index, find_hiring_managers, find_reacho
 from src.phone_lookup import find_phone_for_email, get_own_phone_numbers
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROCESSED_FILE = os.path.join(BASE_DIR, 'data', 'processed_ids.json')
 DEFAULT_TRACKER = os.path.join(BASE_DIR, 'data', 'Job_Tracker.xlsx')
 
 
@@ -70,16 +70,16 @@ LEGACY_PLATFORM_VALUES = {'yes': 'LinkedIn'}
 COLUMN_WIDTHS = {'D': 15.5, 'E': 14.3, 'F': 17.2, 'G': 15.8, 'H': 13.3, 'I': 22.4, 'J': 17.8}
 
 
-def load_processed():
-    if os.path.exists(PROCESSED_FILE):
-        with open(PROCESSED_FILE) as f:
+def load_processed(processed_file):
+    if os.path.exists(processed_file):
+        with open(processed_file) as f:
             return set(json.load(f))
     return set()
 
 
-def save_processed(ids):
-    os.makedirs(os.path.dirname(PROCESSED_FILE), exist_ok=True)
-    with open(PROCESSED_FILE, 'w') as f:
+def save_processed(processed_file, ids):
+    os.makedirs(os.path.dirname(processed_file), exist_ok=True)
+    with open(processed_file, 'w') as f:
         json.dump(sorted(ids), f, indent=2)
 
 
@@ -141,7 +141,11 @@ def fetch_all_messages(service, query, max_results):
     messages = []
     request = service.users().messages().list(userId='me', q=query, maxResults=min(max_results, 500))
     while request is not None and len(messages) < max_results:
-        response = request.execute()
+        try:
+            response = request.execute()
+        except HttpError:
+            print(f'Skipped a Gmail search that could not be completed (query: {query!r}).')
+            break
         messages.extend(response.get('messages', []))
         request = service.users().messages().list_next(previous_request=request, previous_response=response)
     return messages[:max_results]
@@ -150,6 +154,8 @@ def fetch_all_messages(service, query, max_results):
 def main():
     ap = argparse.ArgumentParser(description='Fetch LinkedIn application emails and update the tracker.')
     ap.add_argument('--tracker', default=DEFAULT_TRACKER, help='Path to the tracker xlsx to update')
+    ap.add_argument('--secrets-dir', default=None, help='Directory containing credentials.json/token.json (default: secrets/ next to this script)')
+    ap.add_argument('--processed-ids', default=None, help='Path to the processed-message-ids state file (default: processed_ids.json next to --tracker)')
     ap.add_argument('--max-results', type=int, default=2000, help='Max Gmail messages to scan')
     ap.add_argument('--since', default=None, help='Only include applications on/after this date, e.g. 2026-06-24')
     ap.add_argument('--rebuild', action='store_true', help='Start the tracker fresh instead of appending')
@@ -171,8 +177,12 @@ def main():
         active_sources = SOURCES if args.source == 'all' else [SOURCES_BY_LABEL[args.source]]
         include_reachout = args.include_reachout
 
-    service = get_gmail_service()
-    processed = set() if args.rebuild else load_processed()
+    processed_file = args.processed_ids or os.path.join(os.path.dirname(os.path.abspath(args.tracker)), 'processed_ids.json')
+
+    service = get_gmail_service(secrets_dir=args.secrets_dir)
+    profile = service.users().getProfile(userId='me').execute()
+    print(f"Authenticated as: {profile['emailAddress']}")
+    processed = set() if args.rebuild else load_processed(processed_file)
 
     existing_rows = []
     if args.dry_run:
@@ -235,6 +245,7 @@ def main():
     new_rows = []
     new_count = 0
     skipped_unparsed = 0
+    skipped_unfetchable = 0
 
     for source in active_sources:
         query = source['query']
@@ -249,7 +260,12 @@ def main():
             if msg_id in processed:
                 continue
 
-            msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()
+            try:
+                msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()
+            except HttpError:
+                skipped_unfetchable += 1
+                processed.add(msg_id)
+                continue
             headers = {h['name']: h['value'] for h in msg['payload'].get('headers', [])}
             data = source['parse'](msg, headers)
 
@@ -343,13 +359,15 @@ def main():
                 ws.cell(row=i + 1, column=c, value=val)
 
         wb.save(args.tracker)
-        save_processed(processed)
+        save_processed(processed_file, processed)
         print(f'Added {new_count} new application(s) + {reachout_count} reach-out contact(s); tracker now has {len(all_rows)} row(s), sorted by date, saved to {args.tracker}')
     else:
         print(f'{new_count} new application(s) + {reachout_count} reach-out contact(s) would be added (dry run, nothing saved).')
 
     if skipped_unparsed:
         print(f'Skipped {skipped_unparsed} email(s) that could not be parsed (marked as processed).')
+    if skipped_unfetchable:
+        print(f'Skipped {skipped_unfetchable} email(s) that could not be fetched from Gmail (marked as processed).')
 
     if args.include_phone:
         attempted = len(phone_cache)

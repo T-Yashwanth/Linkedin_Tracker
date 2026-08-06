@@ -13,10 +13,14 @@ CREDENTIALS_FILE = os.path.join(SECRETS_DIR, 'credentials.json')
 TOKEN_FILE = os.path.join(SECRETS_DIR, 'token.json')
 
 
-def get_gmail_service():
+def get_gmail_service(secrets_dir=None):
+    secrets_dir = secrets_dir or SECRETS_DIR
+    credentials_file = os.path.join(secrets_dir, 'credentials.json')
+    token_file = os.path.join(secrets_dir, 'token.json')
+
     creds = None
-    if os.path.exists(TOKEN_FILE):
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+    if os.path.exists(token_file):
+        creds = Credentials.from_authorized_user_file(token_file, SCOPES)
 
     if not creds or not creds.valid:
         refreshed = False
@@ -29,9 +33,9 @@ def get_gmail_service():
                 # through to a fresh interactive login instead of crashing.
                 creds = None
         if not refreshed:
-            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
             creds = flow.run_local_server(port=0)
-        with open(TOKEN_FILE, 'w') as f:
+        with open(token_file, 'w') as f:
             f.write(creds.to_json())
 
     return build('gmail', 'v1', credentials=creds)

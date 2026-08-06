@@ -1,5 +1,7 @@
 import re
 
+from googleapiclient.errors import HttpError
+
 from src.parser import get_text_body, get_html_body
 
 PHONE_RE = re.compile(
@@ -135,9 +137,12 @@ def get_own_phone_numbers(service, fetch_all_messages_fn, sample=8):
     messages = fetch_all_messages_fn(service, 'in:sent', sample)
     counts = {}
     for m in messages:
-        msg = service.users().messages().get(
-            userId='me', id=m['id'], format='full'
-        ).execute(num_retries=3)
+        try:
+            msg = service.users().messages().get(
+                userId='me', id=m['id'], format='full'
+            ).execute(num_retries=3)
+        except HttpError:
+            continue
         text = get_text_body(msg['payload']) or ''
         seen_here = set()
         for pm in PHONE_RE.finditer(text):
@@ -157,9 +162,12 @@ def get_own_linkedin_slugs(service, fetch_all_messages_fn, sample=8):
     messages = fetch_all_messages_fn(service, 'in:sent', sample)
     counts = {}
     for m in messages:
-        msg = service.users().messages().get(
-            userId='me', id=m['id'], format='full'
-        ).execute(num_retries=3)
+        try:
+            msg = service.users().messages().get(
+                userId='me', id=m['id'], format='full'
+            ).execute(num_retries=3)
+        except HttpError:
+            continue
         text = get_text_body(msg['payload']) or ''
         html = get_html_body(msg['payload']) or ''
         seen_here = set()
@@ -185,9 +193,12 @@ def scan_contact_signature(service, fetch_all_messages_fn, email, max_messages=3
     messages = fetch_all_messages_fn(service, query, max_messages)
 
     for m in messages:
-        msg = service.users().messages().get(
-            userId='me', id=m['id'], format='full'
-        ).execute(num_retries=3)
+        try:
+            msg = service.users().messages().get(
+                userId='me', id=m['id'], format='full'
+            ).execute(num_retries=3)
+        except HttpError:
+            continue
         raw_text = get_text_body(msg['payload'])
         stripped = strip_quoted_text(raw_text)
         html = get_html_body(msg['payload'])
