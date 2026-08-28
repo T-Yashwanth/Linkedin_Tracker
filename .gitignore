@@ -8,3 +8,4 @@ data/*.xlsx
 **/data/*.xlsx
 ~$*.xlsx
 .claude
+.yash tracker/data/*.xlsx
