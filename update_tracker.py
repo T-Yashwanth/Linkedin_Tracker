@@ -142,7 +142,7 @@ def fetch_all_messages(service, query, max_results):
     request = service.users().messages().list(userId='me', q=query, maxResults=min(max_results, 500))
     while request is not None and len(messages) < max_results:
         try:
-            response = request.execute()
+            response = request.execute(num_retries=3)
         except HttpError:
             print(f'Skipped a Gmail search that could not be completed (query: {query!r}).')
             break
@@ -180,7 +180,7 @@ def main():
     processed_file = args.processed_ids or os.path.join(os.path.dirname(os.path.abspath(args.tracker)), 'processed_ids.json')
 
     service = get_gmail_service(secrets_dir=args.secrets_dir)
-    profile = service.users().getProfile(userId='me').execute()
+    profile = service.users().getProfile(userId='me').execute(num_retries=3)
     print(f"Authenticated as: {profile['emailAddress']}")
     processed = set() if args.rebuild else load_processed(processed_file)
 
@@ -261,7 +261,7 @@ def main():
                 continue
 
             try:
-                msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()
+                msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute(num_retries=3)
             except HttpError:
                 skipped_unfetchable += 1
                 processed.add(msg_id)

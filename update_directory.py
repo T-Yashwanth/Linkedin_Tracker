@@ -3,6 +3,7 @@ import json
 import os
 
 from dateutil import parser as dateparser
+from googleapiclient.errors import HttpError
 
 from src.gmail_client import get_gmail_service
 from src.recruiter_directory import (
@@ -15,29 +16,34 @@ from src.phone_lookup import (
 from update_tracker import fetch_all_messages
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROCESSED_FILE = os.path.join(BASE_DIR, 'data', 'directory_processed_ids.json')
 DEFAULT_DIRECTORY = os.path.join(BASE_DIR, 'data', 'Recruiters.xlsx')
 
 METADATA_HEADERS = ['To', 'Cc', 'From', 'Subject', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted']
 
 
-def load_processed():
-    if os.path.exists(PROCESSED_FILE):
-        with open(PROCESSED_FILE) as f:
+def load_processed(processed_file):
+    if os.path.exists(processed_file):
+        with open(processed_file) as f:
             return set(json.load(f))
     return set()
 
 
-def save_processed(ids):
-    os.makedirs(os.path.dirname(PROCESSED_FILE), exist_ok=True)
-    with open(PROCESSED_FILE, 'w') as f:
+def save_processed(processed_file, ids):
+    os.makedirs(os.path.dirname(processed_file), exist_ok=True)
+    with open(processed_file, 'w') as f:
         json.dump(sorted(ids), f, indent=2)
 
 
 def fetch_headers(service, msg_id):
-    msg = service.users().messages().get(
-        userId='me', id=msg_id, format='metadata', metadataHeaders=METADATA_HEADERS
-    ).execute(num_retries=3)
+    """Returns None if the message can't be fetched (e.g. a transient
+    Gmail 'Precondition check failed' on a specific message ID) --
+    callers skip it rather than crash the whole scan."""
+    try:
+        msg = service.users().messages().get(
+            userId='me', id=msg_id, format='metadata', metadataHeaders=METADATA_HEADERS
+        ).execute(num_retries=3)
+    except HttpError:
+        return None
     return {h['name']: h['value'] for h in msg['payload'].get('headers', [])}
 
 
@@ -61,6 +67,9 @@ def discover_contacts(service, since_date, max_results, processed, own_email):
         if msg_id in processed:
             continue
         headers = fetch_headers(service, msg_id)
+        processed.add(msg_id)
+        if headers is None:
+            continue
         subject = headers.get('Subject', '')
         for name, email in parse_recipients(headers.get('To', '')):
             if email != own_email:
@@ -68,7 +77,6 @@ def discover_contacts(service, since_date, max_results, processed, own_email):
         for name, email in parse_recipients(headers.get('Cc', '')):
             if email != own_email:
                 book.add(email, name=name, subject=subject)
-        processed.add(msg_id)
 
     for m in fetch_all_messages(service, inbox_query, max_results):
         msg_id = m['id']
@@ -76,7 +84,7 @@ def discover_contacts(service, since_date, max_results, processed, own_email):
             continue
         headers = fetch_headers(service, msg_id)
         processed.add(msg_id)
-        if is_bot_headers(headers):
+        if headers is None or is_bot_headers(headers):
             continue
         subject = headers.get('Subject', '')
         for name, email in parse_recipients(headers.get('From', '')):
@@ -89,6 +97,8 @@ def discover_contacts(service, since_date, max_results, processed, own_email):
 def main():
     ap = argparse.ArgumentParser(description='Build/update the recruiter directory from Gmail.')
     ap.add_argument('--directory', default=DEFAULT_DIRECTORY, help='Path to the directory xlsx to update')
+    ap.add_argument('--secrets-dir', default=None, help='Directory containing credentials.json/token.json (default: secrets/ next to this script)')
+    ap.add_argument('--processed-ids', default=None, help='Path to the processed-message-ids state file (default: directory_processed_ids.json next to --directory)')
     ap.add_argument('--max-results', type=int, default=2000, help='Max Gmail messages to scan per mailbox')
     ap.add_argument('--since', default=None, help='Only scan mail on/after this date, e.g. 2026-06-24')
     ap.add_argument('--rebuild', action='store_true', help='Start the directory fresh instead of merging')
@@ -96,10 +106,13 @@ def main():
     args = ap.parse_args()
 
     since_date = dateparser.parse(args.since).date() if args.since else None
+    processed_file = args.processed_ids or os.path.join(os.path.dirname(os.path.abspath(args.directory)), 'directory_processed_ids.json')
 
-    service = get_gmail_service()
-    processed = set() if args.rebuild else load_processed()
-    own_email = service.users().getProfile(userId='me').execute().get('emailAddress', '').lower()
+    service = get_gmail_service(secrets_dir=args.secrets_dir)
+    profile = service.users().getProfile(userId='me').execute(num_retries=3)
+    print(f"Authenticated as: {profile['emailAddress']}")
+    processed = set() if args.rebuild else load_processed(processed_file)
+    own_email = profile.get('emailAddress', '').lower()
 
     print('Scanning Sent and Inbox mail for recruiter/contact emails...')
     book = discover_contacts(service, since_date, args.max_results, processed, own_email)
@@ -165,7 +178,7 @@ def main():
         print(f'Could not save {args.directory} -- it looks like the file is open in Excel. Close it and re-run.')
         raise
 
-    save_processed(processed)
+    save_processed(processed_file, processed)
     print(f'Added {new_count} new contact(s), updated {updated_count} existing entr{"y" if updated_count == 1 else "ies"}; '
           f'directory now has {len(existing_by_email) + len(no_email_rows)} row(s), saved to {args.directory}')
 
